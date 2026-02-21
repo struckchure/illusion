@@ -7,7 +7,7 @@ import (
 )
 
 type RaylibApp struct {
-	app *App
+	App *App
 }
 
 func (a *RaylibApp) Run() {
@@ -26,7 +26,7 @@ func (a *RaylibApp) Run() {
 		rl.ClearBackground(rl.DarkGray)
 
 		dt := time.Duration(float32(time.Nanosecond)*rl.GetFrameTime()) / 100
-		a.app.Loop(dt)
+		a.App.Loop(dt)
 
 		rl.EndMode3D()
 		rl.EndDrawing()
@@ -34,5 +34,5 @@ func (a *RaylibApp) Run() {
 }
 
 func NewRaylibApp() *RaylibApp {
-	return &RaylibApp{app: NewApp()}
+	return &RaylibApp{App: NewApp()}
 }
