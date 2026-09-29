@@ -1,0 +1,97 @@
+# A game project built with illusion that runs on the desktop and in the
+# browser from the same source:
+#
+#   scaffold new https://github.com/struckchure/illusion#templates/game
+#
+# or, from a checkout of illusion, scaffold new ./templates/game.
+
+messages:
+  pre: |
+    # New illusion game
+
+    Creates a Go module with a starter game, its assets, and a Makefile that
+    runs it on the desktop (`make run`) or builds it for the browser
+    (`make web`).
+
+  post: |
+    # {{ .Project }} is ready
+
+    ```sh
+    cd {{ .ProjectKebab }}
+    make run      # desktop window
+    make serve    # browser build, served at http://localhost:8080
+    ```
+
+    Desktop builds need a C toolchain (raylib compiles with cgo); web builds
+    need emscripten (`brew install emscripten`). See README.md.
+
+questions:
+  - name: module
+    prompt:
+      message: Go module path
+      description: e.g. github.com/you/my-game
+    validate:
+      required: true
+      match:
+        regex: '^[a-zA-Z0-9._~/-]+$'
+        message: a Go module path, like github.com/you/my-game
+
+  - name: kind
+    prompt:
+      message: Starter game
+      description: Both run on the desktop and in the browser
+      default: 3D
+      options:
+        - 3D
+        - 2D
+
+  - name: physics
+    when: '{{ eq .kind "3D" }}'
+    prompt:
+      confirm: Add Jolt physics? (the player pushes crates around)
+      default: true
+
+  - name: illusion_path
+    prompt:
+      message: Local illusion checkout (optional)
+      description: Build against this directory instead of the published module. Absolute, or relative to the new project.
+
+  - name: ci
+    prompt:
+      confirm: Add a GitHub Actions workflow? (builds for the desktop and the web on every push)
+      default: true
+
+presets:
+  default:
+    module: example.com/game
+    kind: 3D
+    physics: true
+    illusion_path: ""
+    ci: true
+
+# Only the chosen starter's asset is copied.
+features:
+  - value: '{{ eq .Scaffold.kind "3D" }}'
+    globs:
+      - "**/assets/checker.png"
+  - value: '{{ eq .Scaffold.kind "2D" }}'
+    globs:
+      - "**/assets/player.png"
+  - value: "{{ .Scaffold.ci }}"
+    globs:
+      - "**/.github/**"
+
+# The Makefile and the workflow have their own {{ }} (go list -f, GitHub
+# expressions), so scaffold's variables use [[ ]] there. Images go through the template engine too, since feature flags
+# don't apply to skipped files, with delimiters that never occur so their bytes
+# pass through unchanged.
+delimiters:
+  - glob: "**/Makefile"
+    left: "[["
+    right: "]]"
+  - glob: "**/.github/workflows/*.yml"
+    left: "[["
+    right: "]]"
+  - glob: "**/*.png"
+    left: "<<<scaffold:no-template"
+    right: "no-template:scaffold>>>"

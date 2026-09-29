@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>__TITLE__</title>
+	<style>
+		html, body { margin: 0; height: 100%; background: #18181c; color: #ccc; font: 14px system-ui, sans-serif; }
+		body { display: grid; place-items: center; }
+		canvas { display: block; max-width: 100vw; max-height: 100vh; outline: none; }
+		#status { position: fixed; inset: auto 0 16px; text-align: center; }
+	</style>
+</head>
+<body>
+	<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+	<p id="status">Loading…</p>
+
+	<!-- The game is Go's wasm; each C library is its own emscripten module
+	     (raylib, and Jolt for physics). Every module must be ready before Go
+	     starts, because the Go side looks them up at globalThis.<name>. -->
+	<script src="wasm_exec.js"></script>
+	<script src="fs.js"></script>
+	<script>
+		const modules = __MODULES__; // filled in by web/build.sh
+
+		function loadScript(src) {
+			return new Promise((resolve, reject) => {
+				const s = document.createElement("script");
+				s.src = src;
+				s.onload = resolve;
+				s.onerror = () => reject(new Error(`could not load ${src}`));
+				document.head.append(s);
+			});
+		}
+
+		// Browsers start audio suspended until the user interacts with the page.
+		// raylib's audio backend (miniaudio) resumes it on click or touch;
+		// keyboard-only games need key presses to count too.
+		addEventListener("keydown", () => globalThis.miniaudio?.unlock?.());
+
+		(async () => {
+			const status = document.getElementById("status");
+			const canvas = document.getElementById("canvas");
+			try {
+				await Promise.all(modules.map(async (name) => {
+					await loadScript(`${name}.js`);
+					const create = globalThis[`create${name[0].toUpperCase()}${name.slice(1)}`];
+					globalThis[name] = await create({ canvas, print: console.log, printErr: console.warn });
+				}));
+				installGoFS(globalThis.raylib.FS); // Go's os package reads raylib's files
+				const go = new Go();
+				const { instance } = await WebAssembly.instantiateStreaming(fetch("game.wasm"), go.importObject);
+				status.remove();
+				canvas.focus();
+				await go.run(instance);
+			} catch (err) {
+				status.textContent = `Failed to start: ${err}`;
+				console.error(err);
+			}
+		})();
+	</script>
+</body>
+</html>
