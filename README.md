@@ -1,5 +1,7 @@
 # Illusion
 
+[![CI](https://github.com/struckchure/illusion/actions/workflows/ci.yml/badge.svg)](https://github.com/struckchure/illusion/actions/workflows/ci.yml)
+
 Illusion is a small Go library that makes a few good tools work together for
 making games: [raylib](https://www.raylib.com) for windowing, input, rendering
 and audio, [Ark](https://github.com/mlange-42/ark) for the ECS, and
