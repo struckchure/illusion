@@ -83,7 +83,9 @@ func (p Plugin) Build(app *illusion.App) {
 	app.SetRunner(func(app *illusion.App) { run(app, cfg) })
 }
 
-func run(app *illusion.App, cfg Config) {
+// open creates the window and applies cfg. The main loop that follows is
+// platform specific: see loop.go and loop_js.go.
+func open(cfg Config) {
 	var flags uint32
 	if cfg.VSync {
 		flags |= rl.FlagVsyncHint
@@ -97,19 +99,12 @@ func run(app *illusion.App, cfg Config) {
 	rl.SetConfigFlags(flags)
 	rl.SetTraceLogLevel(rl.LogWarning)
 	rl.InitWindow(int32(cfg.Width), int32(cfg.Height), cfg.Title)
-	defer rl.CloseWindow()
-	// Release GPU resources while the context is still alive.
-	defer app.Cleanup()
 
 	if cfg.KeepEscape {
 		rl.SetExitKey(rl.KeyNull)
 	}
 	if cfg.TargetFPS > 0 {
 		rl.SetTargetFPS(int32(cfg.TargetFPS))
-	}
-
-	for !app.ShouldExit() {
-		app.Update()
 	}
 }
 

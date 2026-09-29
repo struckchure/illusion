@@ -5,7 +5,11 @@
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Core/Factory.h>
+#ifdef __EMSCRIPTEN__
+#include <Jolt/Core/JobSystemSingleThreaded.h>
+#else
 #include <Jolt/Core/JobSystemThreadPool.h>
+#endif
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -25,6 +29,7 @@
 #include <Jolt/RegisterTypes.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -330,8 +335,14 @@ struct ILL_World {
 	ObjectPairs pairs;
 	ContactBuffer contacts;
 	TempAllocatorImpl temp{32 * 1024 * 1024};
+#ifdef __EMSCRIPTEN__
+	// Browser builds have no threads (they'd need SharedArrayBuffer and
+	// cross-origin isolation headers), so jobs run on the calling thread.
+	JobSystemSingleThreaded jobs{cMaxPhysicsJobs};
+#else
 	JobSystemThreadPool jobs{cMaxPhysicsJobs, cMaxPhysicsBarriers,
 		int(std::max(1u, std::thread::hardware_concurrency()) - 1)};
+#endif
 	// Declared after everything it refers to, so it is destroyed first.
 	PhysicsSystem system;
 	CharacterContacts characterContacts{system, contacts};
@@ -341,6 +352,13 @@ struct ILL_Character {
 	ILL_World* world;
 	Ref<CharacterVirtual> ch;
 };
+
+#ifdef __EMSCRIPTEN__
+// jolt_js.go mirrors these structs; keep the layouts in sync.
+static_assert(sizeof(ILL_BodySettings) == 112 && offsetof(ILL_BodySettings, userData) == 104, "jolt_js.go cBodySettings");
+static_assert(sizeof(ILL_ContactEvent) == 36, "jolt_js.go cContactEvent");
+static_assert(sizeof(ILL_RayHit) == 32, "jolt_js.go cRayHit");
+#endif
 
 extern "C" {
 

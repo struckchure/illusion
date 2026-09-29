@@ -179,6 +179,21 @@ go run ./examples/cube
 | `sprites` | 2D: sprites, a generated sprite-sheet animation, a 2D camera, text, gizmos, sound |
 | `physics` | A platformer playground built from the models in `examples/assets` |
 
+### In the browser (experimental)
+
+Any example can also be built for the web from the same source. It needs
+[emscripten](https://emscripten.org) (`brew install emscripten`):
+
+```bash
+web/build.sh -a examples/assets ./examples/physics
+python3 -m http.server -d build/web/physics 8080
+```
+
+Go can't use cgo when targeting wasm, so raylib and Jolt are built with
+emscripten as separate wasm modules, and Go calls them through `syscall/js`.
+`-a` bundles an asset directory into the page. Every example runs in the
+browser, sound included. See [web/README.md](web/README.md).
+
 ## Repository layout
 
 ```
@@ -186,6 +201,7 @@ go run ./examples/cube
 asset/ audio/ defaults/ diag/ input/ physics/ render/ transform/ window/
 internal/gen    generates the Query and Fn/Cond arity variants (go generate)
 internal/jolt   cgo binding to Jolt; the vendored source lives in third_party
+web/            browser builds: build and test scripts, raylib-go for the web
 examples/
 ```
 

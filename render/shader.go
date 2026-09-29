@@ -3,8 +3,10 @@ package render
 // The default material shader: textured, vertex-colored, with one
 // directional light plus ambient. Uniform and attribute names follow raylib's
 // defaults, so raylib binds mvp, matModel, matNormal, colDiffuse and texture0.
+// The GLSL version header depends on the platform: see shader_gl.go and
+// shader_js.go.
 
-const litVertexShader = `#version 330
+const litVertexShader = vertexHeader + `
 in vec3 vertexPosition;
 in vec2 vertexTexCoord;
 in vec3 vertexNormal;
@@ -25,7 +27,7 @@ void main() {
 }
 `
 
-const litFragmentShader = `#version 330
+const litFragmentShader = fragmentHeader + `
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragNormal;
