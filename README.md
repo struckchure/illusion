@@ -15,7 +15,7 @@ down to the library underneath.
 ```go
 func main() {
 	illusion.New().
-		AddPlugins(engine.DefaultPlugins(engine.Config{})).
+		AddPlugins(defaults.Plugins(defaults.Config{})).
 		AddSystems(illusion.Startup, illusion.Fn3(setup)).
 		AddSystems(illusion.Update, illusion.Fn2(spin)).
 		Run()
@@ -74,7 +74,7 @@ go get github.com/struckchure/illusion
 
 An `illusion.App` holds the Ark world, the schedules and the plugins. A plugin
 is anything with `Build(*illusion.App)`; it adds systems, resources and other
-plugins. `engine.DefaultPlugins` bundles the window, assets, input,
+plugins. `defaults.Plugins` bundles the window, assets, input,
 transforms, rendering, audio and diagnostics. Physics is a separate
 `physics.Plugin`, so games without it skip the C++ build.
 
@@ -161,7 +161,7 @@ systems that connect it to the ECS, and otherwise gets out of the way.
 | `audio` | `Sound` and `Music` assets, the `Audio` parameter, and tone synthesis |
 | `diag` | `Gizmos` (debug lines, boxes, spheres, capsules…) and a stats overlay (F3) |
 | `physics` | Jolt rigid bodies, colliders, sensors, character controllers, raycasts, collision events; `DebugPlugin` draws colliders (F4) |
-| `engine` | `DefaultPlugins`, the bundle of the plugins above except physics |
+| `defaults` | `Plugins`, the bundle of the plugins above except physics |
 
 ## Examples
 
@@ -183,7 +183,7 @@ go run ./examples/cube
 
 ```
 *.go            core: App, schedules, systems, queries, commands, events, states
-asset/ audio/ diag/ engine/ input/ physics/ render/ transform/ window/
+asset/ audio/ defaults/ diag/ input/ physics/ render/ transform/ window/
 internal/gen    generates the Query and Fn/Cond arity variants (go generate)
 internal/jolt   cgo binding to Jolt; the vendored source lives in third_party
 examples/

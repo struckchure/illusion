@@ -17,7 +17,7 @@ import (
 	"github.com/struckchure/illusion"
 	"github.com/struckchure/illusion/asset"
 	"github.com/struckchure/illusion/audio"
-	"github.com/struckchure/illusion/engine"
+	"github.com/struckchure/illusion/defaults"
 	"github.com/struckchure/illusion/input"
 	"github.com/struckchure/illusion/physics"
 	"github.com/struckchure/illusion/render"
@@ -62,7 +62,7 @@ type Sfx struct{ Sting, Pollinate asset.Handle[audio.Sound] }
 func main() {
 	illusion.New().
 		AddPlugins(
-			engine.DefaultPlugins(engine.Config{
+			defaults.Plugins(defaults.Config{
 				Window:    window.Config{Title: "Illusion: bee", MSAA: true},
 				AssetRoot: "examples/assets",
 			}),

@@ -16,7 +16,7 @@ import (
 	"github.com/mlange-42/ark/ecs"
 	"github.com/struckchure/illusion"
 	"github.com/struckchure/illusion/asset"
-	"github.com/struckchure/illusion/engine"
+	"github.com/struckchure/illusion/defaults"
 	"github.com/struckchure/illusion/input"
 	"github.com/struckchure/illusion/physics"
 	"github.com/struckchure/illusion/render"
@@ -93,7 +93,7 @@ type Kit struct {
 func main() {
 	illusion.New().
 		AddPlugins(
-			engine.DefaultPlugins(engine.Config{
+			defaults.Plugins(defaults.Config{
 				Window:    window.Config{Title: "Illusion: treasure island", MSAA: true},
 				AssetRoot: "examples/assets",
 			}),

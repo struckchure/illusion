@@ -1,5 +1,5 @@
-// Package engine bundles the standard plugins.
-package engine
+// Package defaults bundles the standard plugins.
+package defaults
 
 import (
 	"github.com/struckchure/illusion"
@@ -20,10 +20,10 @@ type Config struct {
 	AssetRoot string
 }
 
-// DefaultPlugins opens a window and adds assets, input, transforms,
+// Plugins opens a window and adds assets, input, transforms,
 // rendering, audio and diagnostics (gizmos, and a stats overlay toggled with
 // F3). Physics is separate: add physics.Plugin.
-func DefaultPlugins(cfg Config) illusion.Plugin {
+func Plugins(cfg Config) illusion.Plugin {
 	return illusion.PluginFunc(func(app *illusion.App) {
 		app.AddPlugins(
 			window.Plugin{Config: cfg.Window},

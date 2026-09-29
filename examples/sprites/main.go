@@ -17,8 +17,8 @@ import (
 	"github.com/struckchure/illusion"
 	"github.com/struckchure/illusion/asset"
 	"github.com/struckchure/illusion/audio"
+	"github.com/struckchure/illusion/defaults"
 	"github.com/struckchure/illusion/diag"
-	"github.com/struckchure/illusion/engine"
 	"github.com/struckchure/illusion/input"
 	"github.com/struckchure/illusion/render"
 	"github.com/struckchure/illusion/transform"
@@ -51,7 +51,7 @@ type BlipCooldown struct{ Left float32 }
 
 func main() {
 	illusion.New().
-		AddPlugins(engine.DefaultPlugins(engine.Config{
+		AddPlugins(defaults.Plugins(defaults.Config{
 			Window: window.Config{Title: "Illusion: sprites", MSAA: true, Resizable: true},
 		})).
 		InsertResource(

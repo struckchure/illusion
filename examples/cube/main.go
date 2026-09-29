@@ -9,7 +9,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/struckchure/illusion"
 	"github.com/struckchure/illusion/asset"
-	"github.com/struckchure/illusion/engine"
+	"github.com/struckchure/illusion/defaults"
 	"github.com/struckchure/illusion/input"
 	"github.com/struckchure/illusion/render"
 	"github.com/struckchure/illusion/transform"
@@ -25,7 +25,7 @@ var palette = []rl.Color{rl.Orange, rl.SkyBlue, rl.Lime, rl.Pink, rl.Gold}
 
 func main() {
 	illusion.New().
-		AddPlugins(engine.DefaultPlugins(engine.Config{Window: window.Config{Title: "Illusion: cube", MSAA: true}})).
+		AddPlugins(defaults.Plugins(defaults.Config{Window: window.Config{Title: "Illusion: cube", MSAA: true}})).
 		AddSystems(illusion.Startup, illusion.Fn3(setup)).
 		AddSystems(illusion.Update, illusion.Fn2(spin), illusion.Fn3(controls)).
 		AddSystems(illusion.Render,
