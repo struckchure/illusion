@@ -12,7 +12,8 @@ import (
 // its own linear memory that Go can't point into. Calls go through
 // syscall/js, and anything passed by pointer is copied through a scratch
 // block malloc'd once in raylib's heap: results are written at its start, and
-// arguments are packed after that.
+// arguments are packed after that (or into a temporary allocation when they
+// don't fit, freed after the call).
 const (
 	scratchSize = 64 << 10
 	outSize     = 1 << 10
@@ -26,8 +27,9 @@ var (
 	outView js.Value                // the result area of the scratch block
 	argView js.Value                // the argument area of the scratch block
 
-	buf  [scratchSize]byte // Go-side copy of the scratch block
-	used int               // bytes of arguments packed after outSize
+	buf   [scratchSize]byte // Go-side copy of the scratch block
+	used  int               // bytes of arguments packed after outSize
+	temps []uint32          // arguments too big for the scratch block
 )
 
 // load finds the module on first use rather than at init, so code that only
@@ -44,7 +46,8 @@ func load() {
 }
 
 // views returns raylib's heap, recreating the typed-array views if the heap
-// grew (growing replaces the ArrayBuffer and detaches the old views).
+// grew (growing replaces the ArrayBuffer and detaches the old views). Checking
+// costs a JS call, so it's only done before copying data, not on every call.
 func views() js.Value {
 	load()
 	if heap.IsUndefined() || heap.Get("byteLength").Int() == 0 {
@@ -69,12 +72,18 @@ func export(name string) js.Value {
 
 // call flushes the packed arguments and calls a C function by name.
 func call(name string, args ...any) js.Value {
-	views()
+	load()
 	if used > 0 {
+		views()
 		js.CopyBytesToJS(argView, buf[outSize:outSize+used])
 		used = 0
 	}
-	return export(name).Invoke(args...)
+	r := export(name).Invoke(args...)
+	for _, p := range temps {
+		free(p)
+	}
+	temps = temps[:0]
+	return r
 }
 
 // out is the address C functions write their result to.
@@ -87,6 +96,7 @@ func out() uint32 {
 // same layout in Go and C: fixed-size numbers only, no pointers.
 func result[T any]() T {
 	var v T
+	views()
 	js.CopyBytesToGo(unsafe.Slice((*byte)(unsafe.Pointer(&v)), unsafe.Sizeof(v)), outView)
 	return v
 }
@@ -109,7 +119,9 @@ func argBytes(b []byte) uint32 {
 	load()
 	off := (outSize + used + 7) &^ 7
 	if off+len(b) > scratchSize {
-		panic("rl: arguments don't fit in the scratch block")
+		p := malloc(b)
+		temps = append(temps, p)
+		return p
 	}
 	copy(buf[off:], b)
 	used = off + len(b) - outSize
@@ -121,7 +133,9 @@ func argString(s string) uint32 {
 	load()
 	off := (outSize + used + 7) &^ 7
 	if off+len(s)+1 > scratchSize {
-		panic("rl: string doesn't fit in the scratch block")
+		b := make([]byte, len(s)+1)
+		copy(b, s)
+		return argBytes(b)
 	}
 	copy(buf[off:], s)
 	buf[off+len(s)] = 0
@@ -132,6 +146,18 @@ func argString(s string) uint32 {
 // readHeap copies len(dst) bytes at address p in raylib's heap into dst.
 func readHeap(p uint32, dst []byte) {
 	js.CopyBytesToGo(dst, views().Call("subarray", p, p+uint32(len(dst))))
+}
+
+// writeHeap copies b to address p in raylib's heap.
+func writeHeap(p uint32, b []byte) {
+	js.CopyBytesToJS(views().Call("subarray", p, p+uint32(len(b))), b)
+}
+
+// readArg reads back an argument the C function changed in place.
+func readArg[T any](p uint32) T {
+	var v T
+	readHeap(p, unsafe.Slice((*byte)(unsafe.Pointer(&v)), unsafe.Sizeof(v)))
+	return v
 }
 
 // mirror returns a Go copy of n Ts at address p, or nil when p is NULL.

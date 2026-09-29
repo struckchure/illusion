@@ -60,10 +60,23 @@ from there (see `internal/emscripten`).
   uses on top of that filesystem. Go's `os` package (the asset loader, the
   OBJ fix-up's temp files) and raylib's loaders see the same files. Writes
   last until the page closes.
-- Models: raylib keeps a loaded model. The Go `rl.Model` mirrors its meshes,
-  materials and mesh-material table, and copies each mesh's positions,
-  texcoords, normals and indices, so physics colliders built from models
-  work.
+- Meshes and models: raylib keeps them. The Go `rl.Mesh` holds the counts,
+  VAO and VBO ids, and for generated and loaded meshes Go copies of the
+  positions, texcoords, normals and indices (physics colliders read these).
+  A loaded `rl.Model` mirrors its meshes, materials and mesh-material table.
+  Meshes built in Go keep their own arrays: `UploadMesh` copies them to
+  raylib, `UpdateMeshBuffer` updates the GPU, and functions that read the
+  arrays (`GetMeshBoundingBox`, `GenMeshTangents`, `ExportMesh`) copy the Go
+  arrays over raylib's first. On desktop, raylib reads the Go arrays directly,
+  so both see the same data.
+- Skeletal animation runs in raylib, skinning on the CPU as desktop raylib
+  does by default. The Go `rl.Model` mirrors its skeleton, and its
+  `CurrentPose` and `BoneMatrices` are re-read after each
+  `UpdateModelAnimation`. `rl.ModelAnimation` mirrors every keyframe pose.
+  `DrawModel`/`DrawModelEx` run on the Go side, so changes to the Go
+  materials show up. The animated vertices stay in raylib.
+- Fonts: raylib keeps them. The Go `rl.Font` mirrors the glyph rectangles and
+  metrics (not the glyph images). `LoadFontFromMemory` works with `go:embed`.
 - Images live in Go memory. `ImageDraw*` functions run raylib's own code on
   a copy of the pixels, so they match desktop exactly.
 - Audio: sounds and music stay in raylib's heap. Their Go values carry a Go
@@ -80,8 +93,7 @@ from there (see `internal/emscripten`).
   a few common drawing calls. Anything else fails to compile with
   "undefined: rl.X". Add it to `raylib/` (and to `glue.c` and `lib.sh` if it
   takes structs or isn't exported yet).
-- Meshes you build yourself can't be uploaded yet. Vertex arrays other than
-  positions, texcoords, normals and indices aren't mirrored into Go.
-- Only the default font.
+- `DrawModelWires`, instancing (`DrawMeshInstanced`), and the other model
+  and mesh functions nothing in the repo uses yet.
 - `WindowShouldClose` is always false and `SetTargetFPS` does nothing.
   `requestAnimationFrame` paces frames.

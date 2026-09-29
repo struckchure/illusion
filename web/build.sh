@@ -22,13 +22,15 @@ set -eu
 web=$(cd "$(dirname "$0")" && pwd)
 mod=$(cd "$web/.." && pwd)
 out=
-assets=
+assets= # asset directories, one per line
 title=
+nl='
+'
 while [ $# -gt 1 ]; do
 	case $1 in
 	-m) mod=$(cd "$2" && pwd) ;;
 	-o) out=$2 ;;
-	-a) assets="$assets ${2%/}" ;;
+	-a) assets="$assets${2%/}$nl" ;;
 	-t) title=$2 ;;
 	*) break ;;
 	esac
@@ -47,14 +49,20 @@ out=$(cd "$out" && pwd)
 
 . "$web/lib.sh"
 
-preload=
-for a in $assets; do
-	preload="$preload --preload-file $mod/$a@/$a"
-done
+# Turn the asset directories into --preload-file arguments, kept whole even
+# if the paths contain spaces.
+set --
+while IFS= read -r a; do
+	if [ -n "$a" ]; then
+		set -- "$@" --preload-file "$mod/$a@/$a"
+	fi
+done <<ASSETS
+$assets
+ASSETS
 
 modules=raylib
 rm -f "$out/raylib.data"
-build_raylib "$out" web $preload
+build_raylib "$out" web "$@"
 rm -f "$out/jolt.js" "$out/jolt.wasm"
 if uses_jolt "$pkg"; then
 	build_jolt "$out" web

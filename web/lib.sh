@@ -21,9 +21,9 @@ printf 'module github.com/gen2brain/raylib-go/raylib\n\ngo 1.25\n' >"$work/rayli
 {
 	echo "go $(go env GOVERSION | sed 's/^go//')"
 	echo
-	echo "use $mod"
+	echo "use \"$mod\"" # quoted: paths may contain spaces
 	echo
-	echo "replace github.com/gen2brain/raylib-go/raylib => $work/raylib"
+	echo "replace github.com/gen2brain/raylib-go/raylib => \"$work/raylib\""
 } >"$work/browser.work"
 export GOWORK=$work/browser.work
 
@@ -64,14 +64,15 @@ build_raylib() {
 	version=$(cat "$web/raylib/UPSTREAM_VERSION")
 	(cd "$work" && GOWORK=off GOFLAGS= go mod download github.com/gen2brain/raylib-go/raylib@"$version")
 	src=$(go env GOMODCACHE)/github.com/gen2brain/raylib-go/raylib@$version
-	flags="-Os -DPLATFORM_WEB -DGRAPHICS_API_OPENGL_ES3 -sUSE_GLFW=3 -I$src -Wno-unused-value"
+	# $flags is word-split, so paths (which may contain spaces) go in quoted.
+	flags="-Os -DPLATFORM_WEB -DGRAPHICS_API_OPENGL_ES3 -sUSE_GLFW=3 -Wno-unused-value"
 	objs=$cache/raylib-$version
 	mkdir -p "$objs"
 	for m in rcore rshapes rtextures rtext rmodels raudio; do
-		compile "$objs/$m.o" "$src/$m.c" $flags
+		compile "$objs/$m.o" "$src/$m.c" $flags -I"$src"
 	done
 	glue=$cache/raylib-glue-$(checksum "$web/raylib/glue.c").o
-	compile "$glue" "$web/raylib/glue.c" $flags
+	compile "$glue" "$web/raylib/glue.c" $flags -I"$src"
 
 	# Functions Go calls directly (numbers in, numbers out). The w_* wrappers
 	# in glue.c are exported by EMSCRIPTEN_KEEPALIVE.
@@ -87,7 +88,7 @@ build_raylib() {
 		exports=$exports,_$f
 	done
 	echo "link raylib.wasm"
-	emcc $flags "$objs"/*.o "$glue" -o "$b_out/raylib.js" $(link_flags "$b_env") \
+	emcc $flags -I"$src" "$objs"/*.o "$glue" -o "$b_out/raylib.js" $(link_flags "$b_env") \
 		-sEXPORT_NAME=createRaylib -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 \
 		-sEXPORTED_FUNCTIONS="$exports" -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=HEAPU8,FS "$@"
 }
@@ -97,14 +98,14 @@ build_raylib() {
 build_jolt() {
 	b_out=$1 b_env=$2
 	jolt=$illusion/internal/jolt
-	flags="-std=c++17 -O2 -DNDEBUG -msimd128 -msse4.2 -I$jolt -I$jolt/third_party/JoltPhysics -Wno-unused-parameter"
+	flags="-std=c++17 -O2 -DNDEBUG -msimd128 -msse4.2 -Wno-unused-parameter"
 	objs=$cache/jolt-$(cut -d' ' -f3 "$jolt/third_party/VERSION")
 	mkdir -p "$objs"
 	for f in "$jolt"/unity_*.cpp; do
-		compile "$objs/$(basename "$f" .cpp).o" "$f" $flags
+		compile "$objs/$(basename "$f" .cpp).o" "$f" $flags -I"$jolt" -I"$jolt/third_party/JoltPhysics"
 	done
 	glue=$cache/jolt-glue-$(checksum "$jolt/glue.cpp" "$jolt/glue.h").o
-	compile "$glue" "$jolt/glue.cpp" $flags
+	compile "$glue" "$jolt/glue.cpp" $flags -I"$jolt" -I"$jolt/third_party/JoltPhysics"
 	exports=_malloc,_free$(grep -o 'ILL_[A-Za-z_]*(' "$jolt/glue.h" | tr -d '(' | sort -u | sed 's/^/,_/' | tr -d '\n')
 	echo "link jolt.wasm"
 	em++ $flags "$objs"/*.o "$glue" -o "$b_out/jolt.js" $(link_flags "$b_env") \

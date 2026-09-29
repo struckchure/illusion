@@ -60,40 +60,6 @@ func DrawPlane(centerPos Vector3, size Vector2, col color.RGBA) {
 	call("w_DrawPlane", arg(centerPos), arg(size), rgba(col))
 }
 
-// Text. Only raylib's default font is supported so far.
-
-func DrawFPS(posX int32, posY int32) { call("DrawFPS", posX, posY) }
-
-func DrawText(text string, posX int32, posY int32, fontSize int32, col color.RGBA) {
-	call("w_DrawText", argString(text), posX, posY, fontSize, rgba(col))
-}
-
-func MeasureText(text string, fontSize int32) int32 {
-	return int32(call("MeasureText", argString(text), fontSize).Int())
-}
-
-// GetFontDefault returns raylib's default font. On the web its glyph arrays
-// stay in raylib's memory, so Recs and Chars are nil.
-func GetFontDefault() Font {
-	call("w_GetFontDefault", out())
-	f := result[struct {
-		BaseSize, GlyphCount, GlyphPadding int32
-		Texture                            Texture2D
-	}]()
-	return Font{BaseSize: f.BaseSize, CharsCount: f.GlyphCount, CharsPadding: f.GlyphPadding, Texture: f.Texture}
-}
-
-// MeasureTextEx measures with the default font; font is ignored on the web.
-func MeasureTextEx(font Font, text string, fontSize float32, spacing float32) Vector2 {
-	call("w_MeasureTextEx", argString(text), fontSize, spacing, out())
-	return result[Vector2]()
-}
-
-// DrawTextPro draws with the default font; font is ignored on the web.
-func DrawTextPro(font Font, text string, position, origin Vector2, rotation, fontSize, spacing float32, tint color.RGBA) {
-	call("w_DrawTextPro", argString(text), arg(position), arg(origin), rotation, fontSize, spacing, rgba(tint))
-}
-
 // Textures
 
 // LoadTexture loads from raylib's virtual filesystem: files must be bundled
@@ -111,6 +77,16 @@ func LoadTextureFromImage(image *Image) Texture2D {
 }
 
 func UnloadTexture(texture Texture2D) { call("w_UnloadTexture", arg(texture)) }
+
+func SetTextureFilter(texture Texture2D, filter TextureFilterMode) {
+	call("w_SetTextureFilter", arg(texture), int32(filter))
+}
+
+func GenTextureMipmaps(texture *Texture2D) {
+	p := arg(*texture)
+	call("w_GenTextureMipmaps", p)
+	*texture = readArg[Texture2D](p)
+}
 
 func IsTextureValid(texture Texture2D) bool {
 	return texture.ID > 0 && texture.Width > 0 && texture.Height > 0 && texture.Format > 0 && texture.Mipmaps > 0

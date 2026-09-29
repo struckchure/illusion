@@ -181,7 +181,7 @@ systems that connect it to the ECS, and otherwise gets out of the way.
 | `input` | `Keys`, `MouseButtons` and `Mouse` resources (pressed / just pressed / just released); `Settings{Manual}` for tests and replays |
 | `transform` | `Transform` and `GlobalTransform`, propagated through the hierarchy |
 | `asset` | `Assets[T]` stores, typed handles, and reference-counted file loading |
-| `render` | 3D: `Camera3d`, `Mesh3d`, `Model3d`, `StandardMaterial`, `DirectionalLight`. 2D: `Camera2d`, `Sprite`, `SpriteAnimation`, `Text2d`. Draw sets for immediate-mode raylib calls |
+| `render` | 3D: `Camera3d`, `Mesh3d`, `Model3d`, `StandardMaterial`, `DirectionalLight`, skeletal animation with `Animations` and `AnimationPlayer` (play, play once, crossfade, `AnimationFinished`), and `BoneAttachment` to put entities on bones. 2D: `Camera2d`, `Sprite`, `SpriteAnimation`, `Text2d`. Draw sets for immediate-mode raylib calls |
 | `audio` | `Sound` and `Music` assets, the `Audio` parameter, and tone synthesis |
 | `diag` | `Gizmos` (debug lines, boxes, spheres, capsules…) and a stats overlay (F3) |
 | `physics` | Jolt rigid bodies, colliders, sensors, character controllers, raycasts, collision events; `DebugPlugin` draws colliders (F4) |
@@ -202,6 +202,7 @@ go run ./examples/cube
 | `bee` | A physics garden: character controller, dynamic bodies, collision events, raycasts, a loaded model, hierarchy, sounds, collider debug view |
 | `sprites` | 2D: sprites, a generated sprite-sheet animation, a 2D camera, text, gizmos, sound |
 | `physics` | A platformer playground built from the models in `examples/assets` |
+| `anim` | Skeletal animation: tentacles sharing one model, each with its own `AnimationPlayer`; crossfades, one-shot clips, and orbs riding the tips on `BoneAttachment`s |
 
 ### In the browser (experimental)
 

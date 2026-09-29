@@ -67,11 +67,12 @@ func (Plugin) Build(app *illusion.App) {
 		illusion.Fn1(beginFrame).InSet(Begin).Named("render.beginFrame"),
 		illusion.Fn5(beginCamera).InSet(Begin3D).Named("render.beginCamera"),
 		illusion.Fn5(drawMeshes).InSet(Draw3D).Named("render.drawMeshes"),
-		illusion.Fn5(drawModels).InSet(Draw3D).Named("render.drawModels"),
+		illusion.Fn7(drawModels).InSet(Draw3D).Named("render.drawModels"),
 		illusion.Fn1(endCamera).InSet(End3D).Named("render.endCamera"),
 		illusion.Fn0(rl.EndDrawing).InSet(End).Named("render.endFrame"),
 	)
 	build2D(app)
+	buildAnimation(app)
 }
 
 // Cleanup implements the optional plugin cleanup hook.
@@ -99,6 +100,8 @@ type renderer struct {
 	locLightColor int32
 	locAmbient    int32
 	locUnlit      int32
+
+	posed map[*rl.Mesh]appliedPose // last pose applied to each model, by its meshes
 }
 
 func initRenderer(res *illusion.Res[renderer], textures *illusion.Res[asset.Assets[Texture]]) {
@@ -235,9 +238,11 @@ func drawModels(
 	materials *illusion.Res[asset.Assets[StandardMaterial]],
 	q *illusion.Query2Where[Model3d, transform.GlobalTransform, illusion.Without[Hidden]],
 	withMaterial *illusion.Query1[MeshMaterial3d],
+	players *illusion.Query1[AnimationPlayer],
+	animations *illusion.Res[asset.Assets[Animations]],
 ) {
 	r := res.Get()
-	modelStore, materialStore := models.Get(), materials.Get()
+	modelStore, materialStore, animStore := models.Get(), materials.Get(), animations.Get()
 
 	query := q.Iter()
 	for query.Next() {
@@ -245,6 +250,16 @@ func drawModels(
 		model := modelStore.Get(m.Model)
 		if model == nil {
 			continue
+		}
+		// The pose lives in the shared model, so apply this entity's right
+		// before drawing it.
+		if p, ok := players.Get(query.Entity()); ok {
+			if a := animStore.Get(p.Animations); a != nil {
+				if r.posed == nil {
+					r.posed = map[*rl.Mesh]appliedPose{}
+				}
+				poseModel(model.Model, p, a, r.posed)
+			}
 		}
 		matrix := rl.MatrixMultiply(model.Transform, g.Matrix)
 		meshes := model.GetMeshes()

@@ -73,7 +73,9 @@ func triangulateOBJ(src []byte, dir string) (out []byte, changed bool) {
 	for _, line := range mtllibs {
 		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "mtllib"))
 		if !filepath.IsAbs(name) {
-			fixedLine := "mtllib " + filepath.Join(dir, name)
+			// Forward slashes work on every platform, Windows included, and
+			// keep backslashes out of the OBJ text raylib parses.
+			fixedLine := "mtllib " + filepath.ToSlash(filepath.Join(dir, name))
 			out := bytes.Replace(buf.Bytes(), []byte(line+"\n"), []byte(fixedLine+"\n"), 1)
 			buf.Reset()
 			buf.Write(out)

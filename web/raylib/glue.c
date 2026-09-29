@@ -56,22 +56,60 @@ API void w_DrawCubeWires(const Vector3 *p, float w, float h, float l, unsigned i
 API void w_DrawSphere(const Vector3 *p, float r, unsigned int c) { DrawSphere(*p, r, color(c)); }
 API void w_DrawPlane(const Vector3 *p, const Vector2 *size, unsigned int c) { DrawPlane(*p, *size, color(c)); }
 
-// Text. Only raylib's default font is supported so far: the Font argument of
-// the Ex/Pro variants is ignored.
+// Text. Fonts stay in raylib's heap; Go passes a Font* (NULL for the
+// default font) and mirrors the glyph metrics (see text.go).
+
+static Font fontOf(const Font *f) { return f ? *f : GetFontDefault(); }
 
 API void w_DrawText(const char *text, int x, int y, int size, unsigned int c) { DrawText(text, x, y, size, color(c)); }
-API void w_MeasureTextEx(const char *text, float size, float spacing, Vector2 *out) {
-	*out = MeasureTextEx(GetFontDefault(), text, size, spacing);
+API void w_MeasureTextEx(const Font *f, const char *text, float size, float spacing, Vector2 *out) {
+	*out = MeasureTextEx(fontOf(f), text, size, spacing);
 }
-API void w_DrawTextPro(const char *text, const Vector2 *pos, const Vector2 *origin, float rotation, float size, float spacing, unsigned int c) {
-	DrawTextPro(GetFontDefault(), text, *pos, *origin, rotation, size, spacing, color(c));
+API void w_DrawTextEx(const Font *f, const char *text, const Vector2 *pos, float size, float spacing, unsigned int c) {
+	DrawTextEx(fontOf(f), text, *pos, size, spacing, color(c));
 }
-API void w_GetFontDefault(int *out) {
-	Font f = GetFontDefault();
-	out[0] = f.baseSize;
-	out[1] = f.glyphCount;
-	out[2] = f.glyphPadding;
-	memcpy(&out[3], &f.texture, sizeof f.texture);
+API void w_DrawTextPro(const Font *f, const char *text, const Vector2 *pos, const Vector2 *origin, float rotation, float size, float spacing, unsigned int c) {
+	DrawTextPro(fontOf(f), text, *pos, *origin, rotation, size, spacing, color(c));
+}
+API void w_DrawTextCodepoint(const Font *f, int codepoint, const Vector2 *pos, float size, unsigned int c) {
+	DrawTextCodepoint(fontOf(f), codepoint, *pos, size, color(c));
+}
+API int w_GetGlyphIndex(const Font *f, int codepoint) { return GetGlyphIndex(fontOf(f), codepoint); }
+API void w_GetGlyphAtlasRec(const Font *f, int codepoint, Rectangle *out) { *out = GetGlyphAtlasRec(fontOf(f), codepoint); }
+
+typedef struct {
+	int baseSize, glyphCount, glyphPadding;
+	Texture2D texture;
+	Rectangle *recs;
+	GlyphInfo *glyphs;
+} WFontInfo;
+
+API void w_FontInfo(const Font *f, WFontInfo *out) {
+	Font font = fontOf(f);
+	*out = (WFontInfo){font.baseSize, font.glyphCount, font.glyphPadding, font.texture, font.recs, font.glyphs};
+}
+
+static Font *keepFont(Font f) {
+	if (!IsFontValid(f)) return NULL;
+	Font *p = malloc(sizeof *p);
+	*p = f;
+	return p;
+}
+
+API Font *w_LoadFont(const char *path) { return keepFont(LoadFont(path)); }
+API Font *w_LoadFontEx(const char *path, int size, int *codepoints, int count) {
+	return keepFont(LoadFontEx(path, size, codepoints, count));
+}
+API Font *w_LoadFontFromMemory(const char *type, const unsigned char *data, int dataSize, int size, int *codepoints, int count) {
+	return keepFont(LoadFontFromMemory(type, data, dataSize, size, codepoints, count));
+}
+API Font *w_LoadFontFromImage(void *data, int w, int h, int mipmaps, int format, unsigned int key, int firstChar) {
+	return keepFont(LoadFontFromImage((Image){data, w, h, mipmaps, format}, color(key), firstChar));
+}
+
+API void w_UnloadFont(Font *f) {
+	UnloadFont(*f);
+	free(f);
 }
 
 // Textures. Texture2D holds only numbers, so it crosses as is.
@@ -81,6 +119,8 @@ API void w_LoadTextureFromImage(void *data, int width, int height, int mipmaps, 
 	*out = LoadTextureFromImage((Image){data, width, height, mipmaps, format});
 }
 API void w_UnloadTexture(const Texture2D *t) { UnloadTexture(*t); }
+API void w_SetTextureFilter(const Texture2D *t, int filter) { SetTextureFilter(*t, filter); }
+API void w_GenTextureMipmaps(Texture2D *t) { GenTextureMipmaps(t); }
 API void w_DrawTexturePro(const Texture2D *t, const Rectangle *src, const Rectangle *dst, const Vector2 *origin, float rotation, unsigned int c) {
 	DrawTexturePro(*t, *src, *dst, *origin, rotation, color(c));
 }
@@ -98,6 +138,66 @@ API Mesh *w_GenMeshPlane(float w, float l, int rx, int rz) { return keep(GenMesh
 API Mesh *w_GenMeshSphere(float r, int rings, int slices) { return keep(GenMeshSphere(r, rings, slices)); }
 API Mesh *w_GenMeshCylinder(float r, float h, int slices) { return keep(GenMeshCylinder(r, h, slices)); }
 API Mesh *w_GenMeshTorus(float r, float size, int radSeg, int sides) { return keep(GenMeshTorus(r, size, radSeg, sides)); }
+API Mesh *w_GenMeshPoly(int sides, float r) { return keep(GenMeshPoly(sides, r)); }
+API Mesh *w_GenMeshHemiSphere(float r, int rings, int slices) { return keep(GenMeshHemiSphere(r, rings, slices)); }
+API Mesh *w_GenMeshCone(float r, float h, int slices) { return keep(GenMeshCone(r, h, slices)); }
+API Mesh *w_GenMeshKnot(float r, float size, int radSeg, int sides) { return keep(GenMeshKnot(r, size, radSeg, sides)); }
+API Mesh *w_GenMeshHeightmap(void *data, int w, int h, int mipmaps, int format, const Vector3 *size) {
+	return keep(GenMeshHeightmap((Image){data, w, h, mipmaps, format}, *size));
+}
+API Mesh *w_GenMeshCubicmap(void *data, int w, int h, int mipmaps, int format, const Vector3 *size) {
+	return keep(GenMeshCubicmap((Image){data, w, h, mipmaps, format}, *size));
+}
+
+// A mesh built in Go: Go copies each array it has into a fresh allocation
+// (NULL when absent), and the mesh takes ownership, so UnloadMesh frees them.
+typedef struct {
+	int vertexCount, triangleCount;
+	float *vertices, *texcoords, *texcoords2, *normals, *tangents;
+	unsigned char *colors;
+	unsigned short *indices;
+	int boneCount;
+	unsigned char *boneIndices;
+	float *boneWeights;
+} WMeshArrays;
+
+static float *copyFloats(const float *src, int n) {
+	float *dst = RL_CALLOC(n, sizeof(float));
+	if (src) memcpy(dst, src, n * sizeof(float));
+	return dst;
+}
+
+API Mesh *w_UploadMesh(const WMeshArrays *a, int dynamic) {
+	Mesh m = {
+		.vertexCount = a->vertexCount, .triangleCount = a->triangleCount,
+		.vertices = a->vertices, .texcoords = a->texcoords, .texcoords2 = a->texcoords2,
+		.normals = a->normals, .tangents = a->tangents, .colors = a->colors, .indices = a->indices,
+		.boneCount = a->boneCount, .boneIndices = a->boneIndices, .boneWeights = a->boneWeights,
+	};
+	// Skinned meshes need buffers for CPU skinning to write, as raylib's
+	// model loaders allocate.
+	if (m.boneIndices && m.boneWeights) {
+		m.animVertices = copyFloats(m.vertices, 3 * m.vertexCount);
+		m.animNormals = copyFloats(m.normals, 3 * m.vertexCount);
+	}
+	UploadMesh(&m, dynamic);
+	return keep(m);
+}
+
+API void w_MeshArrays(const Mesh *m, WMeshArrays *out) {
+	*out = (WMeshArrays){m->vertexCount, m->triangleCount, m->vertices, m->texcoords, m->texcoords2,
+		m->normals, m->tangents, m->colors, m->indices, m->boneCount, m->boneIndices, m->boneWeights};
+}
+
+API void w_MeshVboIds(const Mesh *m, unsigned int *out, int n) { memcpy(out, m->vboId, n * sizeof *out); }
+
+API void w_UpdateMeshBuffer(const Mesh *m, int index, const void *data, int size, int offset) {
+	UpdateMeshBuffer(*m, index, data, size, offset);
+}
+API void w_GetMeshBoundingBox(const Mesh *m, BoundingBox *out) { *out = GetMeshBoundingBox(*m); }
+API void w_GenMeshTangents(Mesh *m) { GenMeshTangents(m); }
+API float *w_MeshTangents(const Mesh *m) { return m->tangents; }
+API int w_ExportMesh(const Mesh *m, const char *path) { return ExportMesh(*m, path); }
 
 // The vertex arrays Go mirrors (NULL when absent), so physics can read them.
 typedef struct {
@@ -105,10 +205,14 @@ typedef struct {
 	unsigned int vaoId;
 	float *vertices, *texcoords, *normals;
 	unsigned short *indices;
+	int boneCount;
+	unsigned char *boneIndices;
+	float *boneWeights;
 } WMeshInfo;
 
 API void w_MeshInfo(const Mesh *m, WMeshInfo *out) {
-	*out = (WMeshInfo){m->vertexCount, m->triangleCount, m->vaoId, m->vertices, m->texcoords, m->normals, m->indices};
+	*out = (WMeshInfo){m->vertexCount, m->triangleCount, m->vaoId, m->vertices, m->texcoords, m->normals, m->indices,
+		m->boneCount, m->boneIndices, m->boneWeights};
 }
 
 API void w_UnloadMesh(Mesh *m) {
@@ -306,4 +410,43 @@ API unsigned int w_ColorFromHSV(float h, float s, float v) { return pack(ColorFr
 
 API void w_DrawRectangleRounded(const Rectangle *r, float roundness, int segments, unsigned int c) {
 	DrawRectangleRounded(*r, roundness, segments, color(c));
+}
+
+API Model *w_LoadModelFromMesh(const Mesh *mesh) {
+	Model *p = malloc(sizeof *p);
+	*p = LoadModelFromMesh(*mesh);
+	return p;
+}
+
+// Skeletons and animations. The model's skeleton, current pose and bone
+// matrices stay here; Go mirrors them and re-reads the pose after each
+// animation update (see animation.go).
+
+typedef struct {
+	int boneCount;
+	BoneInfo *bones;
+	Transform *bindPose, *currentPose;
+	Matrix *boneMatrices;
+} WSkeletonInfo;
+
+API void w_ModelSkeleton(const Model *m, WSkeletonInfo *out) {
+	*out = (WSkeletonInfo){m->skeleton.boneCount, m->skeleton.bones, m->skeleton.bindPose, m->currentPose, m->boneMatrices};
+}
+
+API ModelAnimation *w_LoadModelAnimations(const char *path, int *count) { return LoadModelAnimations(path, count); }
+API void w_UnloadModelAnimations(ModelAnimation *anims, int count) { UnloadModelAnimations(anims, count); }
+API int w_IsModelAnimationValid(const Model *m, const ModelAnimation *a) { return IsModelAnimationValid(*m, *a); }
+
+API void w_UpdateModelAnimation(const Model *m, const ModelAnimation *a, float frame) {
+	UpdateModelAnimation(*m, *a, frame);
+}
+API void w_UpdateModelAnimationEx(const Model *m, const ModelAnimation *a, float frameA, const ModelAnimation *b, float frameB, float blend) {
+	UpdateModelAnimationEx(*m, *a, frameA, *b, frameB, blend);
+}
+
+// For shaders that skin on the GPU: uploads the model's bone matrices, as
+// DrawModelEx does before each mesh.
+API void w_SetBoneMatrices(const Model *m, unsigned int shader, int loc) {
+	rlEnableShader(shader);
+	rlSetUniformMatrices(loc, m->boneMatrices, m->skeleton.boneCount);
 }
