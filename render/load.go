@@ -30,7 +30,8 @@ func loadModel(path string) (Model, error) {
 		path = safe
 	}
 	m := rl.LoadModel(path)
-	if !rl.IsModelValid(m) {
+	if !modelLoaded(m) {
+		rl.UnloadModel(m)
 		return Model{}, errors.New("raylib could not load the model")
 	}
 	model := Model{Model: m}
@@ -46,6 +47,23 @@ func loadModel(path string) (Model, error) {
 		}
 	}
 	return model, nil
+}
+
+// modelLoaded reports whether rl.LoadModel succeeded: the model has meshes
+// and materials, and every mesh's vertices are on the GPU. rl.IsModelValid
+// can't be used: raylib 6.0 built without GPU skinning (the default) never
+// uploads bone buffers, yet IsModelValid requires them, so it rejects every
+// skinned model.
+func modelLoaded(m rl.Model) bool {
+	if m.MeshCount == 0 || m.MaterialCount == 0 || m.Meshes == nil || m.Materials == nil || m.MeshMaterial == nil {
+		return false
+	}
+	for _, mesh := range m.GetMeshes() {
+		if mesh.VboID == nil || *mesh.VboID == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func unloadModel(m *Model) {

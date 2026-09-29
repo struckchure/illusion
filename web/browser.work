@@ -1,0 +1,7 @@
+// The workspace for browser builds: illusion as is, with raylib-go replaced
+// by its browser version. web/build.sh builds with GOWORK pointing here.
+go 1.25.3
+
+use ..
+
+replace github.com/gen2brain/raylib-go/raylib => ./raylib
