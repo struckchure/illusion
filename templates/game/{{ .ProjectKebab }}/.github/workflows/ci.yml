@@ -11,10 +11,6 @@ permissions:
 env:
   # The emscripten release web builds use.
   EMSDK_VERSION: 6.0.10
-  # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
-  LINUX_DEPS: >-
-    libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
-    libxinerama-dev libwayland-dev libxkbcommon-dev
 
 jobs:
   desktop:
@@ -38,9 +34,14 @@ jobs:
           go get github.com/struckchure/illusion@main
           go mod tidy
 [[- end ]]
+      # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
       - name: Install raylib's libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_DEPS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
+            libxinerama-dev libwayland-dev libxkbcommon-dev
       - name: Vet
         run: go vet ./...
       - name: Test

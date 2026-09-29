@@ -15,10 +15,6 @@ concurrency:
 env:
   # The emscripten release web builds are tested with.
   EMSDK_VERSION: 6.0.10
-  # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
-  LINUX_DEPS: >-
-    libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
-    libxinerama-dev libwayland-dev libxkbcommon-dev
 
 jobs:
   desktop:
@@ -33,9 +29,14 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
       - name: Install raylib's libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_DEPS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
+            libxinerama-dev libwayland-dev libxkbcommon-dev
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)
@@ -108,8 +109,13 @@ jobs:
           path: ~/.cache/illusion/web
           key: illusion-web-${{ env.EMSDK_VERSION }}-${{ hashFiles('web/raylib/UPSTREAM_VERSION', 'web/raylib/glue.c', 'internal/jolt/third_party/VERSION', 'internal/jolt/glue.cpp', 'internal/jolt/glue.h') }}
           restore-keys: illusion-web-${{ env.EMSDK_VERSION }}-
+      # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
       - name: Install raylib's libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_DEPS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
+            libxinerama-dev libwayland-dev libxkbcommon-dev
       - name: Install scaffold and actionlint
         run: |
           go install github.com/hay-kot/scaffold@v0.13.1
