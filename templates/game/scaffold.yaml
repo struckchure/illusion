@@ -69,6 +69,10 @@ presets:
     illusion_path: ""
     ci: true
 
+# main.go is stored as "main.go{{ print }}" ({{ print }} renders as nothing):
+# a .go name would make gofmt at the repository root read the template's
+# {{ }}, and the name can't contain quotes, which Windows forbids.
+
 # Only the chosen starter's asset is copied.
 features:
   - value: '{{ eq .Scaffold.kind "3D" }}'
