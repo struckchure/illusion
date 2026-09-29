@@ -68,6 +68,22 @@ So far Illusion has only been run on macOS (Apple Silicon).
 go get github.com/struckchure/illusion
 ```
 
+### Starting a game
+
+`templates/game` is a [scaffold](https://hay-kot.github.io/scaffold/) template
+for a new game project. It asks for a module path and a 3D or 2D starter
+(3D can add physics), and sets up a Makefile that runs the game on the
+desktop or builds it for the browser from the same source:
+
+```bash
+go install github.com/hay-kot/scaffold@latest
+scaffold new https://github.com/struckchure/illusion#templates/game
+cd my-game && make run    # or: make serve
+```
+
+`templates/test.sh` generates every variant against a checkout and builds
+each one for both platforms.
+
 ## Concepts
 
 ### App and plugins
@@ -202,6 +218,7 @@ asset/ audio/ defaults/ diag/ input/ physics/ render/ transform/ window/
 internal/gen    generates the Query and Fn/Cond arity variants (go generate)
 internal/jolt   cgo binding to Jolt; the vendored source lives in third_party
 web/            browser builds: build and test scripts, raylib-go for the web
+templates/game  scaffold template for new game projects
 examples/
 ```
 

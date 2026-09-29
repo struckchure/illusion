@@ -20,6 +20,9 @@ the module cache. `-m` names the game's module:
 sh "$(go list -m -f '{{.Dir}}' github.com/struckchure/illusion)/web/build.sh" -m . -a assets .
 ```
 
+Projects made from the game template (`templates/game`) wrap this in
+`make web`.
+
 ## How it fits together
 
 Go can't use cgo when it targets `js/wasm`, so every C library runs as its
