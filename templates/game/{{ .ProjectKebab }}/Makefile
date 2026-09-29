@@ -15,7 +15,7 @@ run:
 	go run .
 
 build:
-	go build -o build/$(GAME) .
+	go build -o build/$(GAME)$(shell go env GOEXE) .
 
 web:
 	sh "$(ILLUSION)/web/build.sh" -m . -o build/web -a assets -t "$(TITLE)" .

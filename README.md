@@ -61,10 +61,15 @@ func spin(q *illusion.Query2[Spin, transform.Transform], t *illusion.Res[illusio
   first time you build (Jolt takes about half a minute; later builds are
   cached).
   - macOS: Xcode Command Line Tools (`xcode-select --install`).
-  - Linux: gcc/g++ plus raylib's X11/OpenGL headers, e.g. on Debian/Ubuntu
-    `libgl1-mesa-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev`.
+  - Linux: gcc/g++ plus raylib's X11/Wayland/OpenGL headers, e.g. on
+    Debian/Ubuntu `libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev
+    libxrandr-dev libxinerama-dev libwayland-dev libxkbcommon-dev`.
+  - Windows: MinGW-w64 gcc/g++ on PATH (e.g. from [MSYS2](https://www.msys2.org)
+    or [WinLibs](https://winlibs.com)). The C++ runtime is linked statically,
+    so binaries don't need MinGW's DLLs.
 
-So far Illusion has only been run on macOS (Apple Silicon).
+CI builds and tests on Linux, macOS and Windows; games have been played on
+macOS (Apple Silicon).
 
 ```bash
 go get github.com/struckchure/illusion

@@ -22,8 +22,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Windows builds use the MinGW-w64 gcc on the runner's PATH.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -37,7 +41,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
             libxinerama-dev libwayland-dev libxkbcommon-dev
+      # Once is enough; on Windows, checkout's CRLF line endings would fail it.
       - name: Check formatting
+        if: runner.os == 'Linux'
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then

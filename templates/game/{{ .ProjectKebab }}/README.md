@@ -8,7 +8,8 @@ The same code runs on the desktop and in the browser.
 - Go 1.25 or newer.
 - For the desktop: a C toolchain, since raylib compiles with cgo{{ if .Scaffold.physics }} (Jolt
   too; its first build takes about half a minute){{ end }}. On macOS, `xcode-select --install`;
-  on Debian/Ubuntu, `gcc g++ libgl1-mesa-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev`.
+  on Debian/Ubuntu, `gcc g++ libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
+  libxinerama-dev libwayland-dev libxkbcommon-dev`; on Windows, MinGW-w64 (e.g. from MSYS2).
 - For the browser: [emscripten](https://emscripten.org) (`brew install emscripten`) and
   Python 3 to serve the page.
 
@@ -26,8 +27,8 @@ later builds take seconds.
 {{ if .Scaffold.ci }}
 ## CI
 
-`.github/workflows/ci.yml` vets, tests and builds the game for Linux and
-macOS, and builds it for the browser, on pushes to `main` and on pull
+`.github/workflows/ci.yml` vets, tests and builds the game for Linux, macOS
+and Windows, and builds it for the browser, on pushes to `main` and on pull
 requests. Each run uploads the builds as artifacts.{{ if .Scaffold.illusion_path }} Since `go.mod` points
 at a local illusion checkout, CI swaps in illusion's `main` branch from GitHub.{{ end }}
 {{ end }}

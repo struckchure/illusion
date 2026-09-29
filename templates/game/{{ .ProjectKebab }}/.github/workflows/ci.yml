@@ -18,8 +18,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Windows builds use the MinGW-w64 gcc on the runner's PATH.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -46,12 +50,13 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test ./...
+      # go build rather than make build: Windows runners don't have make.
       - name: Build
-        run: make build
+        run: go build -o "build/[[ .ProjectKebab ]]$(go env GOEXE)" .
       - uses: actions/upload-artifact@v7
         with:
           name: [[ .ProjectKebab ]]-${{ runner.os }}
-          path: build/[[ .ProjectKebab ]]
+          path: build/
 
   web:
     name: Web
