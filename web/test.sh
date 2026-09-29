@@ -9,8 +9,8 @@
 # types and math work without raylib loaded.
 set -eu
 
-root=$(cd "$(dirname "$0")/.." && pwd)
-web=$root/web
+web=$(cd "$(dirname "$0")" && pwd)
+mod=$(cd "$web/.." && pwd)
 . "$web/lib.sh"
 
 # Packages come first; everything from the first flag on goes to go test.
@@ -20,13 +20,12 @@ while [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; do
 	shift
 done
 
-modules=$cache/node
+modules=$work/modules
 mkdir -p "$modules"
-rm -f "$modules"/*.js "$modules"/*.wasm
 if uses_jolt $pkgs; then
 	build_jolt "$modules" node
 fi
 
 export ILLUSION_WASM_MODULES=$modules
-cd "$root"
+cd "$mod"
 GOOS=js GOARCH=wasm go test -exec "$web/testexec.sh" $pkgs "$@"

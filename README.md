@@ -1,5 +1,7 @@
 # Illusion
 
+[![CI](https://github.com/struckchure/illusion/actions/workflows/ci.yml/badge.svg)](https://github.com/struckchure/illusion/actions/workflows/ci.yml)
+
 Illusion is a small Go library that makes a few good tools work together for
 making games: [raylib](https://www.raylib.com) for windowing, input, rendering
 and audio, [Ark](https://github.com/mlange-42/ark) for the ECS, and
@@ -59,14 +61,36 @@ func spin(q *illusion.Query2[Spin, transform.Transform], t *illusion.Res[illusio
   first time you build (Jolt takes about half a minute; later builds are
   cached).
   - macOS: Xcode Command Line Tools (`xcode-select --install`).
-  - Linux: gcc/g++ plus raylib's X11/OpenGL headers, e.g. on Debian/Ubuntu
-    `libgl1-mesa-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev`.
+  - Linux: gcc/g++ plus raylib's X11/Wayland/OpenGL headers, e.g. on
+    Debian/Ubuntu `libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev
+    libxrandr-dev libxinerama-dev libwayland-dev libxkbcommon-dev`.
+  - Windows: MinGW-w64 gcc/g++ on PATH (e.g. from [MSYS2](https://www.msys2.org)
+    or [WinLibs](https://winlibs.com)). The C++ runtime is linked statically,
+    so binaries don't need MinGW's DLLs.
 
-So far Illusion has only been run on macOS (Apple Silicon).
+CI builds and tests on Linux, macOS and Windows; games have been played on
+macOS (Apple Silicon).
 
 ```bash
 go get github.com/struckchure/illusion
 ```
+
+### Starting a game
+
+`templates/game` is a [scaffold](https://hay-kot.github.io/scaffold/) template
+for a new game project. It asks for a module path and a 3D or 2D starter
+(3D can add physics), and sets up a Makefile that runs the game on the
+desktop or builds it for the browser from the same source, plus, if you want
+it, a GitHub Actions workflow that builds both:
+
+```bash
+go install github.com/hay-kot/scaffold@latest
+scaffold new https://github.com/struckchure/illusion#templates/game
+cd my-game && make run    # or: make serve
+```
+
+`templates/test.sh` generates every variant against a checkout and builds
+each one for both platforms.
 
 ## Concepts
 
@@ -203,6 +227,7 @@ asset/ audio/ defaults/ diag/ input/ physics/ render/ transform/ window/
 internal/gen    generates the Query and Fn/Cond arity variants (go generate)
 internal/jolt   cgo binding to Jolt; the vendored source lives in third_party
 web/            browser builds: build and test scripts, raylib-go for the web
+templates/game  scaffold template for new game projects
 examples/
 ```
 

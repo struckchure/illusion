@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The emscripten release web builds are tested with.
+  EMSDK_VERSION: 6.0.10
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows builds use the MinGW-w64 gcc on the runner's PATH.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
+      - name: Install raylib's libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
+            libxinerama-dev libwayland-dev libxkbcommon-dev
+      # Once is enough; on Windows, checkout's CRLF line endings would fail it.
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: ${{ env.EMSDK_VERSION }}
+          actions-cache-folder: emsdk-cache
+      - name: Cache raylib and Jolt compiled with emscripten
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/illusion/web
+          key: illusion-web-${{ env.EMSDK_VERSION }}-${{ hashFiles('web/raylib/UPSTREAM_VERSION', 'web/raylib/glue.c', 'internal/jolt/third_party/VERSION', 'internal/jolt/glue.cpp', 'internal/jolt/glue.h') }}
+          restore-keys: illusion-web-${{ env.EMSDK_VERSION }}-
+      - name: Vet
+        run: web/go.sh vet ./...
+      - name: Test as wasm
+        run: web/test.sh ./...
+      - name: Build the examples
+        run: |
+          # Each example is a directory with a main.go (examples/assets isn't).
+          for main in examples/*/main.go; do
+            dir=$(dirname "$main")
+            web/build.sh -a examples/assets -o "build/web/$(basename "$dir")" "./$dir"
+          done
+      - name: Upload the example builds
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-examples
+          path: build/web
+          retention-days: 14
+
+  template:
+    name: Game template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: ${{ env.EMSDK_VERSION }}
+          actions-cache-folder: emsdk-cache
+      - name: Cache raylib and Jolt compiled with emscripten
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/illusion/web
+          key: illusion-web-${{ env.EMSDK_VERSION }}-${{ hashFiles('web/raylib/UPSTREAM_VERSION', 'web/raylib/glue.c', 'internal/jolt/third_party/VERSION', 'internal/jolt/glue.cpp', 'internal/jolt/glue.h') }}
+          restore-keys: illusion-web-${{ env.EMSDK_VERSION }}-
+      # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
+      - name: Install raylib's libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
+            libxinerama-dev libwayland-dev libxkbcommon-dev
+      - name: Install scaffold and actionlint
+        run: |
+          go install github.com/hay-kot/scaffold@v0.13.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+      - name: Generate and build every variant
+        run: templates/test.sh "$RUNNER_TEMP/games"

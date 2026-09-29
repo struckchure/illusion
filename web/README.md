@@ -5,11 +5,23 @@ web/build.sh ./examples/cube                       # writes build/web/cube/
 web/build.sh -a examples/assets ./examples/bee     # bundles the assets it loads
 python3 -m http.server -d build/web/bee 8080
 web/test.sh ./internal/jolt ./physics              # the usual tests, as wasm under Node
+web/go.sh vet ./...                                # any go command, for the browser
 ```
 
-Both scripts need [emscripten](https://emscripten.org) (`emcc`) on PATH. The
+The scripts need [emscripten](https://emscripten.org) (`emcc`) on PATH. The
 first build compiles raylib and Jolt, which takes about half a minute. The
-objects are then cached in `web/.cache`.
+objects are then cached in `~/.cache/illusion/web` (set `ILLUSION_WEB_CACHE`
+to move it).
+
+Games in their own module use the same scripts from illusion's directory in
+the module cache. `-m` names the game's module:
+
+```bash
+sh "$(go list -m -f '{{.Dir}}' github.com/struckchure/illusion)/web/build.sh" -m . -a assets .
+```
+
+Projects made from the game template (`templates/game`) wrap this in
+`make web`.
 
 ## How it fits together
 
@@ -28,15 +40,19 @@ starts Go. The modules don't share memory. Pointer arguments are copied
 through a scratch block in the C module's heap, and results are read back
 from there (see `internal/emscripten`).
 
-- `browser.work` is the Go workspace for web builds. It uses illusion
-  unchanged and replaces raylib-go with `raylib/`, so game code is the same
-  for desktop and web. The scripts set `GOWORK` to it.
-- `raylib/` is a Go module with raylib-go's import path and API, implemented
-  over `raylib.wasm`. `sync.sh` copies raylib-go's pure-Go types and math into
-  it. Re-run it after bumping raylib-go.
+- Each script builds in a temporary Go workspace (`lib.sh`) that uses the
+  module being built unchanged and replaces raylib-go with `raylib/`, so game
+  code is the same for desktop and web.
+- `raylib/` has raylib-go's API, implemented over `raylib.wasm`. Every file
+  in it builds only for `js`, and it has no `go.mod`: a nested module would be
+  left out of illusion's module download. The workspace gets a copy with a
+  `go.mod` naming it raylib-go. `sync.sh` copies raylib-go's pure-Go types
+  and math into it. Re-run it after bumping raylib-go.
 - `internal/jolt/jolt_js.go` is the same binding as the cgo one, implemented
   over `jolt.wasm`. Jolt runs single-threaded with wasm SIMD.
-- `lib.sh` builds the modules, and `build.sh` and `test.sh` drive it.
+- `lib.sh` builds the modules, and `build.sh`, `test.sh` and `go.sh` drive
+  it. Illusion may be read-only in the module cache, so nothing is written
+  under `web/`.
   `testexec.cjs` runs a Go test binary in Node with the modules loaded.
 - Files: `-a dir` bundles a directory into raylib's in-memory filesystem
   at the same relative path (as `raylib.data`), so the game's paths work

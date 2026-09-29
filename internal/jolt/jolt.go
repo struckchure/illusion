@@ -8,6 +8,7 @@ package jolt
 #cgo CXXFLAGS: -std=c++17 -O2 -DNDEBUG -I${SRCDIR}/third_party/JoltPhysics -Wno-unused-parameter
 #cgo darwin LDFLAGS: -lc++
 #cgo linux LDFLAGS: -lstdc++ -lm -lpthread
+#cgo windows LDFLAGS: -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
 #include <stdlib.h>
 #include "glue.h"
 */
