@@ -23,7 +23,14 @@ make serve    # builds for the browser and serves it on http://localhost:8080
 browser build to `build/web/` (static files you can host anywhere). The first
 web build compiles raylib{{ if .Scaffold.physics }} and Jolt{{ end }} with emscripten, which takes a minute;
 later builds take seconds.
+{{ if .Scaffold.ci }}
+## CI
 
+`.github/workflows/ci.yml` vets, tests and builds the game for Linux and
+macOS, and builds it for the browser, on pushes to `main` and on pull
+requests. Each run uploads the builds as artifacts.{{ if .Scaffold.illusion_path }} Since `go.mod` points
+at a local illusion checkout, CI swaps in illusion's `main` branch from GitHub.{{ end }}
+{{ end }}
 ## Layout
 
 - `main.go` is the game: plugins, a startup system that spawns the scene, and

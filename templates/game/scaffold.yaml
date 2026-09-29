@@ -56,12 +56,18 @@ questions:
       message: Local illusion checkout (optional)
       description: Build against this directory instead of the published module. Absolute, or relative to the new project.
 
+  - name: ci
+    prompt:
+      confirm: Add a GitHub Actions workflow? (builds for the desktop and the web on every push)
+      default: true
+
 presets:
   default:
     module: example.com/game
     kind: 3D
     physics: true
     illusion_path: ""
+    ci: true
 
 # Only the chosen starter's asset is copied.
 features:
@@ -71,13 +77,19 @@ features:
   - value: '{{ eq .Scaffold.kind "2D" }}'
     globs:
       - "**/assets/player.png"
+  - value: "{{ .Scaffold.ci }}"
+    globs:
+      - "**/.github/**"
 
-# The Makefile has its own {{ }} (for go list -f), so scaffold's variables use
-# [[ ]] there. Images go through the template engine too, since feature flags
+# The Makefile and the workflow have their own {{ }} (go list -f, GitHub
+# expressions), so scaffold's variables use [[ ]] there. Images go through the template engine too, since feature flags
 # don't apply to skipped files, with delimiters that never occur so their bytes
 # pass through unchanged.
 delimiters:
   - glob: "**/Makefile"
+    left: "[["
+    right: "]]"
+  - glob: "**/.github/workflows/*.yml"
     left: "[["
     right: "]]"
   - glob: "**/*.png"

@@ -75,7 +75,8 @@ go get github.com/struckchure/illusion
 `templates/game` is a [scaffold](https://hay-kot.github.io/scaffold/) template
 for a new game project. It asks for a module path and a 3D or 2D starter
 (3D can add physics), and sets up a Makefile that runs the game on the
-desktop or builds it for the browser from the same source:
+desktop or builds it for the browser from the same source, plus, if you want
+it, a GitHub Actions workflow that builds both:
 
 ```bash
 go install github.com/hay-kot/scaffold@latest

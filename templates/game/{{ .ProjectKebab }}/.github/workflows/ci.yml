@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # The emscripten release web builds use.
+  EMSDK_VERSION: 6.0.10
+  # raylib's headers on Linux: OpenGL, and GLFW's X11 and Wayland backends.
+  LINUX_DEPS: >-
+    libgl1-mesa-dev libx11-dev libxi-dev libxcursor-dev libxrandr-dev
+    libxinerama-dev libwayland-dev libxkbcommon-dev
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+[[- if .Scaffold.illusion_path ]]
+      # go.mod builds against a local illusion checkout, which CI doesn't
+      # have, so use illusion from GitHub.
+      - name: Use illusion from GitHub
+        run: |
+          go mod edit -dropreplace=github.com/struckchure/illusion
+          go get github.com/struckchure/illusion@main
+          go mod tidy
+[[- end ]]
+      - name: Install raylib's libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_DEPS
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Build
+        run: make build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: [[ .ProjectKebab ]]-${{ runner.os }}
+          path: build/[[ .ProjectKebab ]]
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+[[- if .Scaffold.illusion_path ]]
+      # go.mod builds against a local illusion checkout, which CI doesn't
+      # have, so use illusion from GitHub.
+      - name: Use illusion from GitHub
+        run: |
+          go mod edit -dropreplace=github.com/struckchure/illusion
+          go get github.com/struckchure/illusion@main
+          go mod tidy
+[[- end ]]
+      - uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: ${{ env.EMSDK_VERSION }}
+          actions-cache-folder: emsdk-cache
+      # raylib and Jolt compiled with emscripten, which only change with
+      # illusion's version (in go.sum).
+      - name: Cache the compiled C libraries
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/illusion/web
+          key: illusion-web-${{ env.EMSDK_VERSION }}-${{ hashFiles('go.sum') }}
+          restore-keys: illusion-web-${{ env.EMSDK_VERSION }}-
+      - name: Build for the browser
+        run: make web
+      - uses: actions/upload-artifact@v7
+        with:
+          name: [[ .ProjectKebab ]]-web
+          path: build/web

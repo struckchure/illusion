@@ -110,9 +110,10 @@ jobs:
           restore-keys: illusion-web-${{ env.EMSDK_VERSION }}-
       - name: Install raylib's libraries
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $LINUX_DEPS
-      - name: Install scaffold
+      - name: Install scaffold and actionlint
         run: |
           go install github.com/hay-kot/scaffold@v0.13.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
       - name: Generate and build every variant
         run: templates/test.sh "$RUNNER_TEMP/games"
