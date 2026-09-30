@@ -1,5 +1,5 @@
-# Desktop: make run, make build. Browser: make web (or make serve to build and
-# serve it). Web builds need emscripten (emcc) on PATH.
+# Desktop: make run, make build. Browser: make web (or make serve to build it
+# and serve it with cmd/web). Web builds need emscripten (emcc) on PATH.
 
 GAME := [[ .ProjectKebab ]]
 TITLE := [[ .Project ]]
@@ -12,17 +12,16 @@ ILLUSION = $(shell go list -m -f '{{.Dir}}' github.com/struckchure/illusion)
 .PHONY: run build web serve test clean
 
 run:
-	go run .
+	go run ./cmd/desktop
 
 build:
-	go build -o build/$(GAME)$(shell go env GOEXE) .
+	go build -o build/$(GAME)$(shell go env GOEXE) ./cmd/desktop
 
 web:
-	sh "$(ILLUSION)/web/build.sh" -m . -o build/web -a assets -t "$(TITLE)" .
+	sh "$(ILLUSION)/web/build.sh" -m . -o build/web -a assets -t "$(TITLE)" ./cmd/web
 
 serve: web
-	@echo "serving on http://localhost:$(PORT)"
-	python3 -m http.server -d build/web $(PORT)
+	go run ./cmd/web -dir build/web -addr :$(PORT)
 
 test:
 	go test ./...

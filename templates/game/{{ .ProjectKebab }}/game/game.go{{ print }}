@@ -1,9 +1,10 @@
 {{- if eq .Scaffold.kind "2D" -}}
-// {{ .Project }}: a 2D game built with illusion. The same code runs on the
-// desktop (make run) and in the browser (make web).
+// Package game is {{ .Project }}, a 2D game built with illusion. The same
+// code runs on the desktop (cmd/desktop, make run) and in the browser
+// (cmd/web, make serve).
 //
 // WASD or the arrow keys move; collect the coins.
-package main
+package game
 
 import (
 	"fmt"
@@ -42,16 +43,16 @@ type Game struct {
 	Pickup asset.Handle[audio.Sound]
 }
 
-func main() {
-	illusion.New().
+// App is the game, ready to Run.
+func App() *illusion.App {
+	return illusion.New().
 		AddPlugins(defaults.Plugins(defaults.Config{
 			Window:    window.Config{Title: "{{ .Project }}"},
 			AssetRoot: "assets",
 		})).
 		AddSystems(illusion.Startup, illusion.Fn3(setup)).
 		AddSystems(illusion.Update, illusion.Chain(illusion.Fn3(move), illusion.Fn5(collect))).
-		AddSystems(illusion.Render, illusion.Fn1(hud).InSet(render.Draw2D)).
-		Run()
+		AddSystems(illusion.Render, illusion.Fn1(hud).InSet(render.Draw2D))
 }
 
 func setup(
@@ -143,11 +144,12 @@ func hud(game *illusion.Res[Game]) {
 	rl.DrawText(fmt.Sprintf("coins %d   WASD / arrows: move", game.Get().Score), 10, 36, 20, rl.RayWhite)
 }
 {{- else -}}
-// {{ .Project }}: a 3D game built with illusion. The same code runs on the
-// desktop (make run) and in the browser (make web).
+// Package game is {{ .Project }}, a 3D game built with illusion. The same
+// code runs on the desktop (cmd/desktop, make run) and in the browser
+// (cmd/web, make serve).
 //
 // WASD or the arrow keys move the cube{{ if .Scaffold.physics }}; Space drops a crate to push around{{ end }}.
-package main
+package game
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -180,8 +182,9 @@ type Crates struct {
 }
 {{- end }}
 
-func main() {
-	illusion.New().
+// App is the game, ready to Run.
+func App() *illusion.App {
+	return illusion.New().
 		AddPlugins(
 			defaults.Plugins(defaults.Config{
 				Window:    window.Config{Title: "{{ .Project }}", MSAA: true},
@@ -193,8 +196,7 @@ func main() {
 		).
 		AddSystems(illusion.Startup, illusion.Fn4(setup)).
 		AddSystems(illusion.Update, illusion.Chain(illusion.Fn3(move), illusion.Fn2(follow)){{ if .Scaffold.physics }}, illusion.Fn4(dropCrate){{ end }}).
-		AddSystems(illusion.Render, illusion.Fn0(hud).InSet(render.Draw2D)).
-		Run()
+		AddSystems(illusion.Render, illusion.Fn0(hud).InSet(render.Draw2D))
 }
 
 func setup(
