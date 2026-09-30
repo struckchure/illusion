@@ -43,6 +43,11 @@ out vec4 finalColor;
 
 void main() {
     vec4 base = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
+    // Cut out what's less than half opaque: hair cards, eyebrows and the
+    // like are alpha-tested, as raylib draws without sorting.
+    if (base.a < 0.5) {
+        discard;
+    }
     if (unlit > 0.5) {
         finalColor = base;
         return;

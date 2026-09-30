@@ -85,6 +85,15 @@ type Model3d struct {
 	Model asset.Handle[Model]
 }
 
+// ModelParts changes how a Model3d draws some of its meshes, by mesh index:
+// Hidden ones aren't drawn, and Texture swaps a mesh's own material's
+// diffuse texture for this entity alone. Use it to hide a body's parts under
+// clothes, or to reskin one character of many sharing a model.
+type ModelParts struct {
+	Hidden  map[int]bool
+	Texture map[int]asset.Handle[Texture]
+}
+
 // MeshMaterial3d sets the material a Mesh3d is drawn with; without it the mesh
 // is drawn white. On a Model3d it replaces every material in the model.
 type MeshMaterial3d struct {
