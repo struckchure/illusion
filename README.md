@@ -181,7 +181,7 @@ systems that connect it to the ECS, and otherwise gets out of the way.
 | `input` | `Keys`, `MouseButtons` and `Mouse` resources (pressed / just pressed / just released); `Settings{Manual}` for tests and replays |
 | `transform` | `Transform` and `GlobalTransform`, propagated through the hierarchy |
 | `asset` | `Assets[T]` stores, typed handles, and reference-counted file loading |
-| `render` | 3D: `Camera3d`, `Mesh3d`, `Model3d`, `StandardMaterial`, `DirectionalLight`, skeletal animation with `Animations` and `AnimationPlayer` (play, play once, crossfade, `AnimationFinished`), and `BoneAttachment` to put entities on bones. 2D: `Camera2d`, `Sprite`, `SpriteAnimation`, `Text2d`. Draw sets for immediate-mode raylib calls |
+| `render` | 3D: `Camera3d`, `Mesh3d`, `Model3d`, `StandardMaterial`, `DirectionalLight`, skeletal animation with `Animations` and `AnimationPlayer` (play, play once, crossfade, `AnimationFinished`), `BoneAttachment` to put entities on bones, and `ModelParts` to hide or retexture single meshes of a model per entity (for clothes over a body, say). 2D: `Camera2d`, `Sprite`, `SpriteAnimation`, `Text2d`. Draw sets for immediate-mode raylib calls |
 | `audio` | `Sound` and `Music` assets, the `Audio` parameter, and tone synthesis |
 | `diag` | `Gizmos` (debug lines, boxes, spheres, capsules…) and a stats overlay (F3) |
 | `physics` | Jolt rigid bodies, colliders, sensors, character controllers, raycasts, collision events; `DebugPlugin` draws colliders (F4) |

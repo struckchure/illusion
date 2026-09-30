@@ -67,7 +67,7 @@ func (Plugin) Build(app *illusion.App) {
 		illusion.Fn1(beginFrame).InSet(Begin).Named("render.beginFrame"),
 		illusion.Fn5(beginCamera).InSet(Begin3D).Named("render.beginCamera"),
 		illusion.Fn5(drawMeshes).InSet(Draw3D).Named("render.drawMeshes"),
-		illusion.Fn7(drawModels).InSet(Draw3D).Named("render.drawModels"),
+		illusion.Fn8(drawModels).InSet(Draw3D).Named("render.drawModels"),
 		illusion.Fn1(endCamera).InSet(End3D).Named("render.endCamera"),
 		illusion.Fn0(rl.EndDrawing).InSet(End).Named("render.endFrame"),
 	)
@@ -240,9 +240,11 @@ func drawModels(
 	withMaterial *illusion.Query1[MeshMaterial3d],
 	players *illusion.Query1[AnimationPlayer],
 	animations *illusion.Res[asset.Assets[Animations]],
+	parts *modelParts,
 ) {
 	r := res.Get()
 	modelStore, materialStore, animStore := models.Get(), materials.Get(), animations.Get()
+	textureStore := parts.textures.Get()
 
 	query := q.Iter()
 	for query.Next() {
@@ -263,11 +265,14 @@ func drawModels(
 		}
 		matrix := rl.MatrixMultiply(model.Transform, g.Matrix)
 		meshes := model.GetMeshes()
+		mp, _ := parts.q.Get(query.Entity())
 
 		if override := materialFor(withMaterial, materialStore, query.Entity()); override != nil {
 			r.apply(override)
-			for _, mesh := range meshes {
-				rl.DrawMesh(mesh, r.material, matrix)
+			for i, mesh := range meshes {
+				if hidden, _ := meshPart(mp, i); !hidden {
+					rl.DrawMesh(mesh, r.material, matrix)
+				}
 			}
 			continue
 		}
@@ -276,11 +281,46 @@ func drawModels(
 		own := model.GetMaterials()
 		meshMaterial := unsafe.Slice(model.MeshMaterial, model.MeshCount)
 		for i, mesh := range meshes {
+			hidden, swap := meshPart(mp, i)
+			if hidden {
+				continue
+			}
 			mat := own[meshMaterial[i]]
 			mat.Shader = r.material.Shader // light the model's own materials
+			if t := textureStore.Get(swap); t != nil {
+				// The maps are shared by every entity drawing this model, so
+				// swap the texture for this draw only.
+				diffuse := mat.GetMap(rl.MapDiffuse)
+				own := diffuse.Texture
+				diffuse.Texture = t.Texture2D
+				rl.DrawMesh(mesh, mat, matrix)
+				diffuse.Texture = own
+				continue
+			}
 			rl.DrawMesh(mesh, mat, matrix)
 		}
 	}
+}
+
+// modelParts is drawModels' view of ModelParts and the textures they swap
+// in, one parameter to stay within Fn8.
+type modelParts struct {
+	q        illusion.Query1[ModelParts]
+	textures illusion.Res[asset.Assets[Texture]]
+}
+
+func (p *modelParts) InitParam(w *ecs.World) {
+	p.q.InitParam(w)
+	p.textures.InitParam(w)
+}
+
+// meshPart reports whether parts hides mesh i, and the texture it swaps in
+// (the zero handle for none).
+func meshPart(parts *ModelParts, i int) (hidden bool, texture asset.Handle[Texture]) {
+	if parts == nil {
+		return false, asset.Handle[Texture]{}
+	}
+	return parts.Hidden[i], parts.Texture[i]
 }
 
 var defaultMaterial = StandardMaterial{BaseColor: rl.White}
