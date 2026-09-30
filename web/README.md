@@ -3,7 +3,7 @@
 ```bash
 web/build.sh ./examples/cube                       # writes build/web/cube/
 web/build.sh -a examples/assets ./examples/bee     # bundles the assets it loads
-python3 -m http.server -d build/web/bee 8080
+go run ./web/serve -dir build/web/bee              # http://localhost:8080
 web/test.sh ./internal/jolt ./physics              # the usual tests, as wasm under Node
 web/go.sh vet ./...                                # any go command, for the browser
 ```

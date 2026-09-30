@@ -4,7 +4,7 @@
 #   web/build.sh [-m module-dir] [-o out-dir] [-a asset-dir]... [-t title] <package>
 #
 # e.g. web/build.sh ./examples/cube writes build/web/cube/. Serve that
-# directory over HTTP (python3 -m http.server -d build/web/cube 8080). Needs
+# directory over HTTP (go run ./web/serve -dir build/web/cube). Needs
 # emscripten (emcc) on PATH.
 #
 # -m builds from another module that depends on illusion (a game in its own

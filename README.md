@@ -211,7 +211,7 @@ Any example can also be built for the web from the same source. It needs
 
 ```bash
 web/build.sh -a examples/assets ./examples/physics
-python3 -m http.server -d build/web/physics 8080
+go run ./web/serve -dir build/web/physics  # http://localhost:8080
 ```
 
 Go can't use cgo when targeting wasm, so raylib and Jolt are built with
@@ -226,7 +226,7 @@ browser, sound included. See [web/README.md](web/README.md).
 asset/ audio/ defaults/ diag/ input/ physics/ render/ transform/ window/
 internal/gen    generates the Query and Fn/Cond arity variants (go generate)
 internal/jolt   cgo binding to Jolt; the vendored source lives in third_party
-web/            browser builds: build and test scripts, raylib-go for the web
+web/            browser builds: build and test scripts, a local server, raylib-go for the web
 templates/game  scaffold template for new game projects
 examples/
 ```
