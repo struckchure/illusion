@@ -52,7 +52,7 @@ jobs:
         run: go test ./...
       # go build rather than make build: Windows runners don't have make.
       - name: Build
-        run: go build -o "build/[[ .ProjectKebab ]]$(go env GOEXE)" .
+        run: go build -o "build/[[ .ProjectKebab ]]$(go env GOEXE)" ./cmd/desktop
       - uses: actions/upload-artifact@v7
         with:
           name: [[ .ProjectKebab ]]-${{ runner.os }}

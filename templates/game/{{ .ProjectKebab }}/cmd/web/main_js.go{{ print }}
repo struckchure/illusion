@@ -1,0 +1,9 @@
+// The browser build of {{ .Project }}: make web compiles this package for
+// js/wasm, where it runs the game instead of the server in main.go.
+package main
+
+import "{{ .Scaffold.module }}/game"
+
+func main() {
+	game.App().Run()
+}

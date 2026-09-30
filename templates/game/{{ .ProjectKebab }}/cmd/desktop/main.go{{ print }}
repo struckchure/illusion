@@ -1,0 +1,9 @@
+// Command desktop runs {{ .Project }} in a desktop window. Run it from the
+// project's directory, since the game loads assets/ relative to it.
+package main
+
+import "{{ .Scaffold.module }}/game"
+
+func main() {
+	game.App().Run()
+}
