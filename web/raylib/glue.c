@@ -437,11 +437,36 @@ API ModelAnimation *w_LoadModelAnimations(const char *path, int *count) { return
 API void w_UnloadModelAnimations(ModelAnimation *anims, int count) { UnloadModelAnimations(anims, count); }
 API int w_IsModelAnimationValid(const Model *m, const ModelAnimation *a) { return IsModelAnimationValid(*m, *a); }
 
+// raylib 6.0's CPU skinning uploads the posed normals to
+// vboId[SHADER_LOC_VERTEX_NORMAL], the colour slot (3), instead of the normal
+// slot (2), so they never reach the GPU and WebGL reports "bufferSubData: no
+// buffer" every frame (see render/skinning.go). routeNormals points each
+// skinned mesh's colour slot at its normal buffer for the update, keeping the
+// real one in saved; restoreColors puts it back.
+static void routeNormals(const Model *m, unsigned int *saved) {
+	for (int i = 0; i < m->meshCount; i++) {
+		Mesh *mesh = &m->meshes[i];
+		saved[i] = mesh->vboId[3];
+		if (mesh->animNormals && mesh->boneWeights && mesh->vboId[2]) mesh->vboId[3] = mesh->vboId[2];
+	}
+}
+static void restoreColors(const Model *m, const unsigned int *saved) {
+	for (int i = 0; i < m->meshCount; i++) m->meshes[i].vboId[3] = saved[i];
+}
+
 API void w_UpdateModelAnimation(const Model *m, const ModelAnimation *a, float frame) {
+	unsigned int *saved = malloc(m->meshCount * sizeof(unsigned int));
+	routeNormals(m, saved);
 	UpdateModelAnimation(*m, *a, frame);
+	restoreColors(m, saved);
+	free(saved);
 }
 API void w_UpdateModelAnimationEx(const Model *m, const ModelAnimation *a, float frameA, const ModelAnimation *b, float frameB, float blend) {
+	unsigned int *saved = malloc(m->meshCount * sizeof(unsigned int));
+	routeNormals(m, saved);
 	UpdateModelAnimationEx(*m, *a, frameA, *b, frameB, blend);
+	restoreColors(m, saved);
+	free(saved);
 }
 
 // For shaders that skin on the GPU: uploads the model's bone matrices, as

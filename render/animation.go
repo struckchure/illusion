@@ -292,6 +292,8 @@ func poseModel(model rl.Model, p *AnimationPlayer, a *Animations, last map[*rl.M
 		return
 	}
 	last[model.Meshes] = want
+	restore := routeSkinnedNormals(model)
+	defer restore()
 	if want.prev >= 0 {
 		rl.UpdateModelAnimationEx(model, a.Clips[want.prev], want.prevFrame, a.Clips[cur], want.frame, want.blend)
 		return
