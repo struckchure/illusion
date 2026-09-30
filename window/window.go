@@ -24,8 +24,15 @@ type Config struct {
 	TargetFPS int
 	// VSync syncs presentation with the display.
 	VSync bool
-	// Resizable lets the user resize the window.
+	// Resizable lets the user resize the window. In a browser, the canvas
+	// fills the page and follows it instead.
 	Resizable bool
+	// HighDPI renders at the display's full resolution on high-DPI screens
+	// (Retina, most phones) rather than upscaling, which blurs. Screen
+	// coordinates stay the same on the desktop, where raylib scales 2D
+	// drawing; in a browser they're device pixels, so scale 2D sizes by
+	// [Window.Scale].
+	HighDPI bool
 	// MSAA enables 4x multisample anti-aliasing.
 	MSAA bool
 	// KeepEscape stops Escape from closing the window (raylib's default).
@@ -57,8 +64,14 @@ type Window struct {
 	Resized bool
 	// Focused is true while the window has keyboard focus.
 	Focused bool
+	// Scale is how many screen coordinates make up one of the display's
+	// logical pixels: devicePixelRatio in a browser with HighDPI, 1
+	// otherwise. Multiply 2D sizes (text, UI) by it to keep them the same
+	// size on every screen.
+	Scale float32
 
 	title string
+	cfg   Config
 }
 
 // Title returns the window title.
@@ -78,7 +91,7 @@ type Plugin struct {
 // Build implements [illusion.Plugin].
 func (p Plugin) Build(app *illusion.App) {
 	cfg := p.Config.withDefaults()
-	app.InsertResource(illusion.R(&Window{Width: cfg.Width, Height: cfg.Height, title: cfg.Title}))
+	app.InsertResource(illusion.R(&Window{Width: cfg.Width, Height: cfg.Height, Scale: 1, title: cfg.Title, cfg: cfg}))
 	app.AddSystems(illusion.First, illusion.Fn2(updateWindow).Named("window.update"))
 	app.SetRunner(func(app *illusion.App) { run(app, cfg) })
 }
@@ -86,19 +99,18 @@ func (p Plugin) Build(app *illusion.App) {
 // open creates the window and applies cfg. The main loop that follows is
 // platform specific: see loop.go and loop_js.go.
 func open(cfg Config) {
-	var flags uint32
+	flags := platformFlags(cfg)
 	if cfg.VSync {
 		flags |= rl.FlagVsyncHint
-	}
-	if cfg.Resizable {
-		flags |= rl.FlagWindowResizable
 	}
 	if cfg.MSAA {
 		flags |= rl.FlagMsaa4xHint
 	}
 	rl.SetConfigFlags(flags)
 	rl.SetTraceLogLevel(rl.LogWarning)
-	rl.InitWindow(int32(cfg.Width), int32(cfg.Height), cfg.Title)
+	width, height := initialSize(cfg)
+	rl.InitWindow(int32(width), int32(height), cfg.Title)
+	fit(cfg)
 
 	if cfg.KeepEscape {
 		rl.SetExitKey(rl.KeyNull)
@@ -110,6 +122,8 @@ func open(cfg Config) {
 
 func updateWindow(win *illusion.Res[Window], exit *illusion.Res[illusion.AppExit]) {
 	w := win.Get()
+	fit(w.cfg)
+	w.Scale = scale(w.cfg)
 	width, height := rl.GetScreenWidth(), rl.GetScreenHeight()
 	w.Resized = width != w.Width || height != w.Height
 	w.Width, w.Height = width, height
