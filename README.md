@@ -177,7 +177,7 @@ systems that connect it to the ECS, and otherwise gets out of the way.
 
 | Package | What it does |
 |---|---|
-| `window` | Opens the raylib window and runs the main loop on the main thread |
+| `window` | Opens the raylib window and runs the main loop on the main thread; `HighDPI` renders at full resolution on Retina screens, and in a browser a `Resizable` window fills the page |
 | `input` | `Keys`, `MouseButtons` and `Mouse` resources (pressed / just pressed / just released); `Settings{Manual}` for tests and replays |
 | `transform` | `Transform` and `GlobalTransform`, propagated through the hierarchy |
 | `asset` | `Assets[T]` stores, typed handles, and reference-counted file loading |

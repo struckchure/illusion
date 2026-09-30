@@ -87,6 +87,18 @@ from there (see `internal/emscripten`).
   `requestAnimationFrame` (`window/loop_js.go`), and shaders are GLSL ES 3.00
   (`render/shader_js.go`).
 
+## The canvas
+
+By default the canvas is `window.Config`'s Width x Height, centered on the
+page. With `Resizable` it fills the page and follows it. With `HighDPI` its
+drawing buffer is its CSS size times `devicePixelRatio`, so it's sharp on
+Retina screens and phones. Screen coordinates are then device pixels, so
+scale 2D sizes by `window.Window.Scale`. The window package sizes the canvas
+itself, every frame, rather than leaving it to raylib, whose web resize
+handler ignores `devicePixelRatio`. It sets the CSS size with a stylesheet
+rule, since emscripten clears the canvas's inline size whenever the buffer
+changes.
+
 ## Not yet
 
 - raylib coverage: only the functions illusion and its examples use, plus

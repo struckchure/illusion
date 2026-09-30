@@ -18,13 +18,14 @@ func InitWindow(width int32, height int32, title string) {
 	call("InitWindow", width, height, argString(title))
 }
 
-func CloseWindow()                { call("CloseWindow") }
-func IsWindowReady() bool         { return truthy(call("IsWindowReady")) }
-func IsWindowFocused() bool       { return truthy(call("IsWindowFocused")) }
-func SetWindowTitle(title string) { call("SetWindowTitle", argString(title)) }
-func GetScreenWidth() int         { return call("GetScreenWidth").Int() }
-func GetScreenHeight() int        { return call("GetScreenHeight").Int() }
-func SetExitKey(key int32)        { call("SetExitKey", key) }
+func CloseWindow()                    { call("CloseWindow") }
+func IsWindowReady() bool             { return truthy(call("IsWindowReady")) }
+func IsWindowFocused() bool           { return truthy(call("IsWindowFocused")) }
+func SetWindowTitle(title string)     { call("SetWindowTitle", argString(title)) }
+func SetWindowSize(width, height int) { call("SetWindowSize", width, height) }
+func GetScreenWidth() int             { return call("GetScreenWidth").Int() }
+func GetScreenHeight() int            { return call("GetScreenHeight").Int() }
+func SetExitKey(key int32)            { call("SetExitKey", key) }
 
 // WindowShouldClose is always false in a browser: the page owns the canvas,
 // and raylib's web version of this function needs Asyncify.

@@ -78,7 +78,7 @@ build_raylib() {
 	# in glue.c are exported by EMSCRIPTEN_KEEPALIVE.
 	exports=_malloc,_free
 	for f in SetConfigFlags SetTraceLogLevel InitWindow CloseWindow IsWindowReady \
-		IsWindowFocused SetWindowTitle GetScreenWidth GetScreenHeight SetExitKey \
+		IsWindowFocused SetWindowTitle SetWindowSize GetScreenWidth GetScreenHeight SetExitKey \
 		GetFPS GetFrameTime GetTime BeginDrawing EndDrawing EndMode3D EndMode2D \
 		IsKeyDown IsKeyPressed IsKeyReleased GetKeyPressed GetCharPressed \
 		IsMouseButtonDown IsMouseButtonPressed IsMouseButtonReleased GetMouseWheelMove \
