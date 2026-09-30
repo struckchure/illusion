@@ -32,9 +32,20 @@ func TestBonePoseMatchesRaylib(t *testing.T) {
 		}
 	}
 	posed := map[*rl.Mesh]appliedPose{}
+	var cloth clothState
 	check := func(p *AnimationPlayer, label string) {
 		t.Helper()
-		poseModel(model, p, a, posed) // raylib writes model.CurrentPose
+		poseModel(model, p, a, posed) // raylib writes model.CurrentPose and BoneMatrices
+		// Cloth poses the model itself, and has to agree too.
+		if !poseBones(&cloth, &model, p, a) {
+			t.Fatalf("%s: poseBones failed", label)
+		}
+		for bone := range 2 {
+			probe := rl.Vector3{X: 0.3, Y: 1.1, Z: -0.2}
+			if got, want := rl.Vector3Transform(probe, cloth.bones[bone]), rl.Vector3Transform(probe, matrices[bone]); !nearVec(got, want) {
+				t.Fatalf("%s bone %d: cloth's matrix moves a point to %v, raylib's to %v", label, bone, got, want)
+			}
+		}
 		for bone := range 2 {
 			got, ok := bonePose(&model, p, a, bone)
 			want := pose[bone]

@@ -245,6 +245,7 @@ func drawModels(
 	r := res.Get()
 	modelStore, materialStore, animStore := models.Get(), materials.Get(), animations.Get()
 	textureStore := parts.textures.Get()
+	dt := parts.time.Get().DeltaSecs()
 
 	query := q.Iter()
 	for query.Next() {
@@ -253,6 +254,7 @@ func drawModels(
 		if model == nil {
 			continue
 		}
+		matrix := rl.MatrixMultiply(model.Transform, g.Matrix)
 		// The pose lives in the shared model, so apply this entity's right
 		// before drawing it.
 		if p, ok := players.Get(query.Entity()); ok {
@@ -260,10 +262,15 @@ func drawModels(
 				if r.posed == nil {
 					r.posed = map[*rl.Mesh]appliedPose{}
 				}
-				poseModel(model.Model, p, a, r.posed)
+				if cloth, ok := parts.cloth.Get(query.Entity()); ok && simulate(cloth, &model.Model, p, a, matrix, dt) {
+					// The meshes now hold this entity's cloth: whoever
+					// draws the model next has to pose it again.
+					delete(r.posed, model.Meshes)
+				} else {
+					poseModel(model.Model, p, a, r.posed)
+				}
 			}
 		}
-		matrix := rl.MatrixMultiply(model.Transform, g.Matrix)
 		meshes := model.GetMeshes()
 		mp, _ := parts.q.Get(query.Entity())
 
@@ -303,15 +310,20 @@ func drawModels(
 }
 
 // modelParts is drawModels' view of ModelParts and the textures they swap
-// in, one parameter to stay within Fn8.
+// in, and of Cloth and the time it moves by: one parameter to stay within
+// Fn8.
 type modelParts struct {
 	q        illusion.Query1[ModelParts]
 	textures illusion.Res[asset.Assets[Texture]]
+	cloth    illusion.Query1[Cloth]
+	time     illusion.Res[illusion.Time]
 }
 
 func (p *modelParts) InitParam(w *ecs.World) {
 	p.q.InitParam(w)
 	p.textures.InitParam(w)
+	p.cloth.InitParam(w)
+	p.time.InitParam(w)
 }
 
 // meshPart reports whether parts hides mesh i, and the texture it swaps in
