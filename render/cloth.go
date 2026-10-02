@@ -10,8 +10,11 @@ import (
 // Cloth lets parts of an entity's skinned Model3d move with physics: hair
 // that swings, a skirt that sways and trails. Each simulated vertex follows
 // where the animation puts it, but it has weight: it lags behind when the
-// entity moves, hangs under gravity, keeps its distance to its neighbours,
-// and is pushed out of the Colliders. Freedom limits how far it can stray,
+// entity moves, swings under gravity, keeps its distance to its neighbours,
+// resists folding (like the bending stiffness of Blender's cloth), and is
+// pushed out of the Colliders. The model is taken to be the shape the cloth
+// hangs in at rest, already draped: at rest, it stays there rather than
+// sagging below it. Freedom limits how far it can stray,
 // and it never goes in behind where the animation puts it (along the
 // surface's normal there), so it can't sink into the body or what's worn
 // under it.
@@ -34,6 +37,10 @@ type Cloth struct {
 	// Stiffness is the share of the way back to its animated shape the cloth
 	// is pulled each 60th of a second (0 to 1). The zero value means 0.02.
 	Stiffness float32
+	// Bending is how hard the cloth keeps its folds, each pass (0 to 1): how
+	// much of the way back the distance across each pair of triangles
+	// sharing an edge is put. The zero value means 0.5.
+	Bending float32
 	// Thickness is how far the cloth keeps off the Colliders, in metres.
 	// The zero value means 0.005.
 	Thickness float32
@@ -62,7 +69,7 @@ type Capsule struct {
 const (
 	clothStep       = float32(1.0 / 60) // the simulation's time step, in seconds
 	clothMaxSteps   = 4                 // steps per frame at most; a slower frame runs slow
-	clothIterations = 4                 // constraint passes per step
+	clothIterations = 6                 // constraint passes per step
 	clothTeleport   = 1.0               // metres: moving further in a frame restarts the cloth
 )
 
@@ -81,7 +88,8 @@ type clothMesh struct {
 	first    []int32   // particle -> one of its vertices
 	freedom  []float32 // particle -> how far it can stray
 	edges    [][2]int32
-	free     []int32 // the particles that move
+	bends    [][2]int32 // the far corners of each pair of triangles sharing an edge
+	free     []int32    // the particles that move
 
 	pos, prev          []rl.Vector3 // particles, world space
 	target, lastTarget []rl.Vector3 // where the pose puts each particle, world space
@@ -108,19 +116,33 @@ func newClothMesh(vertices []rl.Vector3, triangles []int32, freedom []float32) *
 		}
 	}
 	seen := map[[2]int32]bool{}
+	far := map[[2]int32]int32{} // edge -> the far corner of the first triangle on it
+	bent := map[[2]int32]bool{}
 	for t := 0; t+2 < len(triangles); t += 3 {
 		for k := range 3 {
 			a, b := c.particle[triangles[t+k]], c.particle[triangles[t+(k+1)%3]]
-			if a == b || (c.freedom[a] == 0 && c.freedom[b] == 0) {
+			o := c.particle[triangles[t+(k+2)%3]]
+			if a == b {
 				continue
 			}
 			if a > b {
 				a, b = b, a
 			}
-			if e := [2]int32{a, b}; !seen[e] {
-				seen[e] = true
-				c.edges = append(c.edges, e)
+			e := [2]int32{a, b}
+			if other, ok := far[e]; !ok {
+				far[e] = o
+			} else if other != o && (c.freedom[other] > 0 || c.freedom[o] > 0) {
+				pair := [2]int32{min(other, o), max(other, o)}
+				if !bent[pair] {
+					bent[pair] = true
+					c.bends = append(c.bends, pair)
+				}
 			}
+			if (c.freedom[a] == 0 && c.freedom[b] == 0) || seen[e] {
+				continue
+			}
+			seen[e] = true
+			c.edges = append(c.edges, e)
 		}
 	}
 	for p, f := range c.freedom {
@@ -177,37 +199,25 @@ type worldCapsule struct {
 
 // step advances the simulation by h seconds, the targets moving from
 // lastTarget to target over the step's share t of the frame.
-func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness float32, colliders []worldCapsule) {
+func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bending float32, colliders []worldCapsule) {
 	g := rl.Vector3Scale(gravity, h*h)
+	// The pull back to shape aims above the pose by as much as gravity
+	// would drag the cloth below it at rest: the pose is how it hangs.
+	hold := rl.Vector3Scale(g, -(1-stiffness)/stiffness)
 	for _, p := range c.free {
 		target := rl.Vector3Lerp(c.lastTarget[p], c.target[p], t)
 		x := c.pos[p]
 		v := rl.Vector3Scale(rl.Vector3Subtract(x, c.prev[p]), keep)
 		c.prev[p] = x
 		x = rl.Vector3Add(rl.Vector3Add(x, v), g)
-		c.pos[p] = rl.Vector3Lerp(x, target, stiffness)
+		c.pos[p] = rl.Vector3Lerp(x, rl.Vector3Add(target, hold), stiffness)
 	}
 	for range clothIterations {
 		for _, e := range c.edges {
-			a, b := e[0], e[1]
-			pa, pb := c.at(a, t), c.at(b, t)
-			d := rl.Vector3Subtract(pb, pa)
-			length := rl.Vector3Length(d)
-			if length < 1e-6 {
-				continue
-			}
-			rest := rl.Vector3Distance(c.targetAt(a, t), c.targetAt(b, t))
-			wa, wb := c.mobility(a), c.mobility(b)
-			if wa+wb == 0 {
-				continue
-			}
-			fix := rl.Vector3Scale(d, (length-rest)/length/(wa+wb))
-			if wa > 0 {
-				c.pos[a] = rl.Vector3Add(pa, rl.Vector3Scale(fix, wa))
-			}
-			if wb > 0 {
-				c.pos[b] = rl.Vector3Subtract(pb, rl.Vector3Scale(fix, wb))
-			}
+			c.keepApart(e[0], e[1], t, 1)
+		}
+		for _, e := range c.bends {
+			c.keepApart(e[0], e[1], t, bending)
 		}
 		for _, p := range c.free {
 			target := c.targetAt(p, t)
@@ -223,6 +233,29 @@ func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness float
 			// loose cloth into a leg that swings into it.
 			c.pos[p] = collide(rl.Vector3Add(target, off), target, colliders)
 		}
+	}
+}
+
+// keepApart moves particles a and b the share k of the way back to the
+// distance the pose puts between them.
+func (c *clothMesh) keepApart(a, b int32, t, k float32) {
+	wa, wb := c.mobility(a), c.mobility(b)
+	if wa+wb == 0 {
+		return
+	}
+	pa, pb := c.at(a, t), c.at(b, t)
+	d := rl.Vector3Subtract(pb, pa)
+	length := rl.Vector3Length(d)
+	if length < 1e-6 {
+		return
+	}
+	rest := rl.Vector3Distance(c.targetAt(a, t), c.targetAt(b, t))
+	fix := rl.Vector3Scale(d, k*(length-rest)/length/(wa+wb))
+	if wa > 0 {
+		c.pos[a] = rl.Vector3Add(pa, rl.Vector3Scale(fix, wa))
+	}
+	if wb > 0 {
+		c.pos[b] = rl.Vector3Subtract(pb, rl.Vector3Scale(fix, wb))
 	}
 }
 
@@ -307,12 +340,15 @@ func simulate(cloth *Cloth, model *rl.Model, p *AnimationPlayer, a *Animations, 
 	if gravity == (rl.Vector3{}) {
 		gravity = rl.Vector3{Y: -9.8}
 	}
-	damping, stiffness := cloth.Damping, cloth.Stiffness
+	damping, stiffness, bending := cloth.Damping, cloth.Stiffness, cloth.Bending
 	if damping == 0 {
 		damping = 0.03
 	}
 	if stiffness == 0 {
 		stiffness = 0.02
+	}
+	if bending == 0 {
+		bending = 0.5
 	}
 	thickness := cloth.Thickness
 	if thickness == 0 {
@@ -371,7 +407,7 @@ func simulate(cloth *Cloth, model *rl.Model, p *AnimationPlayer, a *Animations, 
 				c.started = true
 			}
 			for k := range steps {
-				c.step(clothStep, float32(k+1)/float32(steps), gravity, 1-damping, stiffness, colliders)
+				c.step(clothStep, float32(k+1)/float32(steps), gravity, 1-damping, stiffness, bending, colliders)
 			}
 			// The moved particles back into the model's space, for drawing.
 			for v, p := range c.particle {
