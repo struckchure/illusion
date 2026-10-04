@@ -100,6 +100,35 @@ type MeshMaterial3d struct {
 	Material asset.Handle[StandardMaterial]
 }
 
+// Shader is GLSL the game draws with in place of the default material
+// shader: as a resource it replaces it for everything, and in a [Pass] it
+// draws a model once more. Vertex and Fragment are written without a
+// #version line (the platform's is added), and an empty one is the default
+// shader's. See shader.go for the attributes and uniforms a shader is given.
+type Shader struct {
+	Vertex   string
+	Fragment string
+	// Uniforms are the shader's own uniforms by name, of one to four floats
+	// (float, vec2, vec3, vec4). They are sent every frame, so change them
+	// freely.
+	Uniforms map[string][]float32
+}
+
+// Pass draws a Model3d's meshes (or a Mesh3d's mesh) again, right after the
+// model itself and in the same pose, with another shader: outlines,
+// highlights, silhouettes.
+type Pass struct {
+	Shader *Shader
+	// CullFront draws back faces rather than front ones, as an inverted-hull
+	// outline does.
+	CullFront bool
+	// Skip leaves meshes out of the pass, by mesh index.
+	Skip map[int]bool
+}
+
+// Passes are the extra passes a Model3d or Mesh3d is drawn with, in order.
+type Passes []Pass
+
 // Camera3d renders the scene from the entity's GlobalTransform, looking along
 // its Forward direction. If several cameras exist, the one with the highest
 // Order is used.

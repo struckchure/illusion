@@ -92,6 +92,9 @@ func IsTextureValid(texture Texture2D) bool {
 	return texture.ID > 0 && texture.Width > 0 && texture.Height > 0 && texture.Format > 0 && texture.Mipmaps > 0
 }
 
+// SetCullFace sets which faces are culled: 0 for front faces, 1 for back.
+func SetCullFace(mode int32) { call("rlSetCullFace", mode) }
+
 func GetTextureIdDefault() uint32 { return uint32(call("rlGetTextureIdDefault").Int()) }
 
 func DrawTexturePro(texture Texture2D, source, dest Rectangle, origin Vector2, rotation float32, tint color.RGBA) {

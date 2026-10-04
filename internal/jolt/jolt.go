@@ -337,3 +337,16 @@ func (c *Character) Supported() bool { return C.ILL_Character_IsSupported(c.c) !
 
 // InnerBody is the rigid body that represents the character to other bodies.
 func (c *Character) InnerBody() BodyID { return BodyID(C.ILL_Character_InnerBody(c.c)) }
+
+// OverlapCapsule reports significant penetration, ignoring touching support surfaces.
+func (w *World) OverlapCapsule(center [3]float32, radius, height float32, ignore BodyID) bool {
+	return C.ILL_World_OverlapCapsule(w.w, fp(&center[0]), C.float(radius), C.float(height), C.ILL_BodyID(ignore)) != 0
+}
+func (w *World) SweepCapsule(center, delta [3]float32, radius, height float32, ignore BodyID) (RayHit, bool) {
+	var h C.ILL_RayHit
+	if C.ILL_World_SweepCapsule(w.w, fp(&center[0]), fp(&delta[0]), C.float(radius), C.float(height), C.ILL_BodyID(ignore), &h) == 0 {
+		return RayHit{}, false
+	}
+	return RayHit{Body: BodyID(h.body), Fraction: float32(h.fraction), Point: [3]float32{float32(h.point[0]), float32(h.point[1]), float32(h.point[2])}, Normal: [3]float32{float32(h.normal[0]), float32(h.normal[1]), float32(h.normal[2])}}, true
+}
+func (c *Character) UpdateControlled(dt float32) { C.ILL_Character_UpdateControlled(c.c, C.float(dt)) }

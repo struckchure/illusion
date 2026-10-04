@@ -395,3 +395,20 @@ func (c *Character) Supported() bool {
 func (c *Character) InnerBody() BodyID {
 	return BodyID(emscripten.Uint32(mod().Call("ILL_Character_InnerBody", c.c)))
 }
+
+func (w *World) OverlapCapsule(center [3]float32, radius, height float32, ignore BodyID) bool {
+	m := mod()
+	return emscripten.Bool(m.Call("ILL_World_OverlapCapsule", w.w, emscripten.Arg(m, center), radius, height, uint32(ignore)))
+}
+func (w *World) SweepCapsule(center, delta [3]float32, radius, height float32, ignore BodyID) (RayHit, bool) {
+	m := mod()
+	out := m.Alloc(int(unsafe.Sizeof(cRayHit{})))
+	if !emscripten.Bool(m.Call("ILL_World_SweepCapsule", w.w, emscripten.Arg(m, center), emscripten.Arg(m, delta), radius, height, uint32(ignore), out)) {
+		return RayHit{}, false
+	}
+	h := emscripten.Read[cRayHit](m, out)
+	return RayHit{Body: BodyID(h.Body), Fraction: h.Fraction, Point: h.Point, Normal: h.Normal}, true
+}
+func (c *Character) UpdateControlled(dt float32) {
+	mod().Call("ILL_Character_UpdateControlled", c.c, dt)
+}

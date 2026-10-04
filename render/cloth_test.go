@@ -55,7 +55,7 @@ func hang(c *clothMesh, v []rl.Vector3, shift rl.Vector3, n int, colliders []wor
 		c.started = true
 	}
 	for range n {
-		c.step(clothStep, 1, rl.Vector3{Y: -9.8}, 0.97, 0.02, colliders)
+		c.step(clothStep, 1, rl.Vector3{Y: -9.8}, 0.97, 0.02, 0.5, colliders)
 		copy(c.lastTarget, c.target)
 	}
 }
@@ -187,6 +187,34 @@ func TestClothIsPushedOutOfTheBody(t *testing.T) {
 	for _, p := range c.free {
 		if d := rl.Vector3Distance(c.pos[p], closestOnSegment(c.pos[p], leg[0].a, leg[0].b)); d < leg[0].radius-1e-4 {
 			t.Errorf("particle %d is %.3f inside the leg", p, leg[0].radius-d)
+		}
+	}
+}
+
+func TestClothRestsWhereItHangs(t *testing.T) {
+	// Left alone, a hanging strip stays as it's modelled rather than
+	// sagging below it: the model is how it hangs.
+	v, tri := strip(4)
+	c := newClothMesh(v, tri, ClothFreedom(v, tri, []bool{true, true}, 1, 0.3))
+	hang(c, v, rl.Vector3{}, 600, nil)
+	for p := range c.first {
+		if d := rl.Vector3Distance(c.pos[p], c.target[p]); d > 0.002 {
+			t.Errorf("particle %d rests %.4f from where it hangs", p, d)
+		}
+	}
+}
+
+func TestClothBendsBetweenTriangles(t *testing.T) {
+	// The strip's quads are two triangles each, and neighbouring triangles
+	// share edges: each shared edge with a moving far corner is a bend.
+	v, tri := strip(2)
+	c := newClothMesh(v, tri, ClothFreedom(v, tri, []bool{true, true}, 1, 1))
+	if len(c.bends) != 3 {
+		t.Fatalf("%d bends, want 3 (one per shared edge): %v", len(c.bends), c.bends)
+	}
+	for _, b := range c.bends {
+		if b[0] == b[1] {
+			t.Errorf("bend %v joins a particle to itself", b)
 		}
 	}
 }

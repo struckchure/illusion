@@ -4,6 +4,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/mlange-42/ark/ecs"
 	"github.com/struckchure/illusion/internal/jolt"
+	"github.com/struckchure/illusion/transform"
 )
 
 // Physics is a system parameter for pushing bodies around and querying the
@@ -113,4 +114,55 @@ func (p *Physics) cast(origin, direction rl.Vector3, maxDistance float32, ignore
 		return RayHit{}, false
 	}
 	return RayHit{Entity: e, Point: vec(hit.Point), Normal: vec(hit.Normal), Distance: hit.Fraction * maxDistance}, true
+}
+
+// ignoredBody resolves either a rigid body or a character's inner body.
+func (p *Physics) ignoredBody(e ecs.Entity) jolt.BodyID {
+	if id, ok := p.id(e); ok {
+		return id
+	}
+	if c := p.chars.Get(e); c != nil {
+		return c.body
+	}
+	return jolt.InvalidBody
+}
+
+// OverlapCapsuleExcluding checks a vertical capsule for penetration.
+func (p *Physics) OverlapCapsuleExcluding(center rl.Vector3, radius, height float32, exclude ecs.Entity) bool {
+	if radius <= 0 || height <= 2*radius {
+		return true
+	}
+	return p.world.jolt.OverlapCapsule(v3(center), radius, height, p.ignoredBody(exclude))
+}
+
+// SweepCapsuleExcluding checks a capsule moving by delta, returning the first obstruction.
+func (p *Physics) SweepCapsuleExcluding(center, delta rl.Vector3, radius, height float32, exclude ecs.Entity) (RayHit, bool) {
+	if rl.Vector3LengthSqr(delta) == 0 {
+		return RayHit{}, false
+	}
+	h, ok := p.world.jolt.SweepCapsule(v3(center), v3(delta), radius, height, p.ignoredBody(exclude))
+	if !ok {
+		return RayHit{}, false
+	}
+	return RayHit{Entity: p.world.entities[h.Body], Point: vec(h.Point), Normal: vec(h.Normal), Distance: h.Fraction * rl.Vector3Length(delta)}, true
+}
+
+// ResizeCharacter tests clearance and preserves the feet. The prepare phase rebuilds the capsule.
+func (p *Physics) ResizeCharacter(e ecs.Entity, cc *CharacterController, tr *transform.Transform, height float32) bool {
+	if height <= 2*cc.Radius {
+		return false
+	}
+	center := tr.Translation
+	center.Y += (height - cc.Height) / 2
+	if p.OverlapCapsuleExcluding(center, cc.Radius, height, e) {
+		return false
+	}
+	cc.Height, tr.Translation = height, center
+	return true
+}
+
+// StaticSurface reports whether e is a solid, static body suitable for authored traversal.
+func (p *Physics) StaticSurface(e ecs.Entity) bool {
+	b := p.bodies.Get(e)
+	return b != nil && b.config.rigidBody == Static && !b.config.sensor
 }

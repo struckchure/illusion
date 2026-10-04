@@ -13,7 +13,17 @@ func loadTexture(path string) (Texture, error) {
 	if !rl.IsTextureValid(t) {
 		return Texture{}, errors.New("raylib could not load the texture")
 	}
+	filterTexture(&t)
 	return Texture{t}, nil
+}
+
+// Mipmaps reduce distant shimmer; trilinear filtering blends both texels
+// and mip levels as the camera moves. Keep tiny utility textures untouched.
+func filterTexture(t *rl.Texture2D) {
+	if t.Width > 1 && t.Height > 1 {
+		rl.GenTextureMipmaps(t)
+		rl.SetTextureFilter(*t, rl.FilterTrilinear)
+	}
 }
 
 func unloadTexture(t *Texture) {
@@ -41,6 +51,8 @@ func loadModel(path string) (Model, error) {
 		for i := int32(0); i < rl.MaxMaterialMaps; i++ {
 			t := mat.GetMap(i).Texture
 			if t.ID != 0 && t.ID != defaultID && !seen[t.ID] {
+				filterTexture(&t)
+				mat.GetMap(i).Texture = t
 				seen[t.ID] = true
 				model.ownTextures = append(model.ownTextures, t)
 			}
