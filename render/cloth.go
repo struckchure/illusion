@@ -67,10 +67,12 @@ type Capsule struct {
 }
 
 const (
-	clothStep       = float32(1.0 / 60) // the simulation's time step, in seconds
-	clothMaxSteps   = 4                 // steps per frame at most; a slower frame runs slow
-	clothIterations = 6                 // constraint passes per step
-	clothTeleport   = 1.0               // metres: moving further in a frame restarts the cloth
+	clothStep = float32(1.0 / 60) // the simulation's time step, in seconds
+	// Steps per frame at most; a slower frame runs slow. Few, so that a
+	// machine a step is slow on isn't slowed further by owing more of them.
+	clothMaxSteps   = 2
+	clothIterations = 6   // constraint passes per step
+	clothTeleport   = 1.0 // metres: moving further in a frame restarts the cloth
 )
 
 type clothState struct {
@@ -101,7 +103,10 @@ type clothMesh struct {
 	pos, prev              []rl.Vector3 // particles, world space
 	target, lastTarget     []rl.Vector3 // where the pose puts each particle, world space
 	normal                 []rl.Vector3 // the posed surface's normal at each moving particle, world space
-	started                bool
+	// The colliders each moving particle can reach this frame (see reach):
+	// those of free[i] are near[nearEnd[i-1]:nearEnd[i]], by index.
+	near, nearEnd []int32
+	started       bool
 }
 
 // newClothMesh builds the simulation of a mesh with vertices (bind
@@ -247,7 +252,7 @@ func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bend
 		for i, e := range c.bends {
 			c.keepApart(e[0], e[1], c.bendLength[i], bending)
 		}
-		for _, p := range c.free {
+		for i, p := range c.free {
 			target := c.stepTarget[p]
 			// Within its freedom of where the pose puts it, and not behind it.
 			off := rl.Vector3Subtract(c.pos[p], target)
@@ -259,9 +264,56 @@ func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bend
 			}
 			// And out of the body, whatever the pose says: the pose sinks
 			// loose cloth into a leg that swings into it.
-			c.pos[p] = collide(rl.Vector3Add(target, off), target, colliders)
+			c.pos[p] = c.collide(i, rl.Vector3Add(target, off), target, colliders)
 		}
 	}
+}
+
+// reach works out which colliders each moving particle can touch this
+// frame. A particle stays within its freedom of where the pose puts it, and
+// that moves from lastTarget to target, so only a collider within that (and
+// as far again as a collider can push it) matters. Most particles are
+// nowhere near most limbs: this leaves each a handful to test, where every
+// constraint pass of every step would otherwise test them all.
+func (c *clothMesh) reach(colliders []worldCapsule) {
+	var widest float32
+	for _, k := range colliders {
+		widest = max(widest, k.radius)
+	}
+	c.near = c.near[:0]
+	if len(c.nearEnd) != len(c.free) {
+		c.nearEnd = make([]int32, len(c.free))
+	}
+	for i, p := range c.free {
+		x := c.target[p]
+		within := c.freedom[p] + widest + rl.Vector3Distance(c.lastTarget[p], x)
+		for j, k := range colliders {
+			r := k.radius + within
+			if x.X < min(k.a.X, k.b.X)-r || x.X > max(k.a.X, k.b.X)+r ||
+				x.Y < min(k.a.Y, k.b.Y)-r || x.Y > max(k.a.Y, k.b.Y)+r ||
+				x.Z < min(k.a.Z, k.b.Z)-r || x.Z > max(k.a.Z, k.b.Z)+r {
+				continue
+			}
+			c.near = append(c.near, int32(j))
+		}
+		c.nearEnd[i] = int32(len(c.near))
+	}
+}
+
+// collide pushes x, where free[i] is, out of the colliders it can reach (or
+// of them all, if reach hasn't said which those are).
+func (c *clothMesh) collide(i int, x, target rl.Vector3, colliders []worldCapsule) rl.Vector3 {
+	if len(c.nearEnd) != len(c.free) {
+		return collide(x, target, colliders)
+	}
+	start := int32(0)
+	if i > 0 {
+		start = c.nearEnd[i-1]
+	}
+	for _, j := range c.near[start:c.nearEnd[i]] {
+		x = pushOut(x, target, colliders[j])
+	}
+	return x
 }
 
 // keepApart moves particles a and b the share k of the way back to the
@@ -316,30 +368,35 @@ func (c *clothMesh) targetAt(p int32, t float32) rl.Vector3 {
 // goes out towards target, where the pose puts it.
 func collide(x, target rl.Vector3, colliders []worldCapsule) rl.Vector3 {
 	for _, k := range colliders {
-		// Most particles are nowhere near most limbs. Reject their capsule
-		// bounds before doing segment projection and square roots.
-		r := k.radius
-		if x.X < min(k.a.X, k.b.X)-r || x.X > max(k.a.X, k.b.X)+r ||
-			x.Y < min(k.a.Y, k.b.Y)-r || x.Y > max(k.a.Y, k.b.Y)+r ||
-			x.Z < min(k.a.Z, k.b.Z)-r || x.Z > max(k.a.Z, k.b.Z)+r {
-			continue
-		}
-		closest := closestOnSegment(x, k.a, k.b)
-		d := rl.Vector3Subtract(x, closest)
-		distSq := rl.Vector3LengthSqr(d)
-		if distSq >= r*r {
-			continue
-		}
-		dist := float32(math.Sqrt(float64(distSq)))
-		if dist < 1e-6 {
-			d, dist = rl.Vector3Subtract(target, closest), rl.Vector3Distance(target, closest)
-			if dist < 1e-6 {
-				continue
-			}
-		}
-		x = rl.Vector3Add(closest, rl.Vector3Scale(d, r/dist))
+		x = pushOut(x, target, k)
 	}
 	return x
+}
+
+// pushOut pushes x out of capsule k.
+func pushOut(x, target rl.Vector3, k worldCapsule) rl.Vector3 {
+	// Reject by the capsule's bounds before doing segment projection and
+	// square roots.
+	r := k.radius
+	if x.X < min(k.a.X, k.b.X)-r || x.X > max(k.a.X, k.b.X)+r ||
+		x.Y < min(k.a.Y, k.b.Y)-r || x.Y > max(k.a.Y, k.b.Y)+r ||
+		x.Z < min(k.a.Z, k.b.Z)-r || x.Z > max(k.a.Z, k.b.Z)+r {
+		return x
+	}
+	closest := closestOnSegment(x, k.a, k.b)
+	d := rl.Vector3Subtract(x, closest)
+	distSq := rl.Vector3LengthSqr(d)
+	if distSq >= r*r {
+		return x
+	}
+	dist := float32(math.Sqrt(float64(distSq)))
+	if dist < 1e-6 {
+		d, dist = rl.Vector3Subtract(target, closest), rl.Vector3Distance(target, closest)
+		if dist < 1e-6 {
+			return x
+		}
+	}
+	return rl.Vector3Add(closest, rl.Vector3Scale(d, r/dist))
 }
 
 func closestOnSegment(p, a, b rl.Vector3) rl.Vector3 {
@@ -444,6 +501,7 @@ func simulate(cloth *Cloth, model *rl.Model, p *AnimationPlayer, a *Animations, 
 				clear(c.drawOffset)
 				c.started = true
 			}
+			c.reach(colliders)
 			for k := range frame.steps {
 				t := frame.first + float32(k)*frame.stride
 				copy(c.drawPrev, c.drawOffset)
@@ -457,8 +515,8 @@ func simulate(cloth *Cloth, model *rl.Model, p *AnimationPlayer, a *Animations, 
 			if pm.normals != nil {
 				c.surfaceNormals(c.poseNormal, pm.positions)
 			}
-			for _, p := range c.free {
-				c.drawPosition[p] = rl.Vector3Transform(c.drawAt(p, frame.alpha, colliders), back)
+			for i, p := range c.free {
+				c.drawPosition[p] = rl.Vector3Transform(c.drawNear(i, frame.alpha, colliders), back)
 			}
 			for v, p := range c.particle {
 				if c.freedom[p] > 0 {
@@ -500,6 +558,18 @@ func (s *clothState) schedule(dt float32) clothFrame {
 }
 
 func (c *clothMesh) drawAt(p int32, alpha float32, colliders []worldCapsule) rl.Vector3 {
+	return collide(rl.Vector3Add(c.target[p], c.drawnOffset(p, alpha)), c.target[p], colliders)
+}
+
+// drawNear is drawAt for free[i], against the colliders it can reach.
+func (c *clothMesh) drawNear(i int, alpha float32, colliders []worldCapsule) rl.Vector3 {
+	p := c.free[i]
+	return c.collide(i, rl.Vector3Add(c.target[p], c.drawnOffset(p, alpha)), c.target[p], colliders)
+}
+
+// drawnOffset is how far from its pose particle p is drawn, alpha of the way
+// from the last physics step to this one.
+func (c *clothMesh) drawnOffset(p int32, alpha float32) rl.Vector3 {
 	off := rl.Vector3Lerp(c.drawPrev[p], c.drawOffset[p], alpha)
 	if length := rl.Vector3Length(off); length > c.freedom[p] {
 		off = rl.Vector3Scale(off, c.freedom[p]/length)
@@ -507,7 +577,7 @@ func (c *clothMesh) drawAt(p int32, alpha float32, colliders []worldCapsule) rl.
 	if inward := rl.Vector3DotProduct(off, c.normal[p]); inward < 0 {
 		off = rl.Vector3Subtract(off, rl.Vector3Scale(c.normal[p], inward))
 	}
-	return collide(rl.Vector3Add(c.target[p], off), c.target[p], colliders)
+	return off
 }
 
 // surfaceNormals accumulates triangle areas across welded UV seams.

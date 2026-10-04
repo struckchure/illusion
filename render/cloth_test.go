@@ -218,3 +218,45 @@ func TestClothBendsBetweenTriangles(t *testing.T) {
 		}
 	}
 }
+
+func TestReachFindsEveryColliderAParticleTouches(t *testing.T) {
+	// A strip of cloth hanging past three limbs.
+	var vertices []rl.Vector3
+	var triangles []int32
+	for i := range 20 {
+		y := float32(i) * 0.05
+		vertices = append(vertices, rl.Vector3{X: -0.05, Y: y}, rl.Vector3{X: 0.05, Y: y})
+		if i > 0 {
+			a := int32(2 * (i - 1))
+			triangles = append(triangles, a, a+1, a+2, a+1, a+3, a+2)
+		}
+	}
+	freedom := make([]float32, len(vertices))
+	for i := range freedom {
+		freedom[i] = 0.08
+	}
+	c := newClothMesh(vertices, triangles, freedom)
+	copy(c.target, vertices)
+	for p := range c.lastTarget {
+		c.lastTarget[p] = rl.Vector3Add(c.target[p], rl.Vector3{Z: 0.03}) // it moved this frame
+	}
+	colliders := []worldCapsule{
+		{a: rl.Vector3{X: -0.3, Y: 0.2, Z: 0.02}, b: rl.Vector3{X: 0.3, Y: 0.25, Z: 0.02}, radius: 0.06},
+		{a: rl.Vector3{Y: 0.5, Z: -0.05}, b: rl.Vector3{Y: 0.9, Z: 0.05}, radius: 0.07},
+		{a: rl.Vector3{X: 2, Y: 0.5}, b: rl.Vector3{X: 2, Y: 0.9}, radius: 0.1}, // out of reach
+	}
+	c.reach(colliders)
+	if len(c.near) == 0 || len(c.near) >= len(c.free)*len(colliders) {
+		t.Fatalf("reach kept %d of %d pairs, want some but not all", len(c.near), len(c.free)*len(colliders))
+	}
+	for i, p := range c.free {
+		for _, off := range []rl.Vector3{{}, {Z: 0.08}, {Z: -0.08}, {X: 0.05, Y: -0.05}, {X: -0.04, Z: 0.06}} {
+			for _, target := range []rl.Vector3{c.target[p], c.lastTarget[p]} {
+				x := rl.Vector3Add(target, off)
+				if got, want := c.collide(i, x, target, colliders), collide(x, target, colliders); got != want {
+					t.Fatalf("particle %d at %v: %v by the colliders in reach, %v by them all", p, x, got, want)
+				}
+			}
+		}
+	}
+}
