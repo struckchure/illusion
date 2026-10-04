@@ -106,6 +106,8 @@ type clothMesh struct {
 	// The colliders each moving particle can reach this frame (see reach):
 	// those of free[i] are near[nearEnd[i-1]:nearEnd[i]], by index.
 	near, nearEnd []int32
+	within        []float32      // how far from its pose each of free can get this frame
+	close         []closeCapsule // the colliders near the mesh at all
 	started       bool
 }
 
@@ -246,12 +248,8 @@ func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bend
 		c.pos[p] = rl.Vector3Lerp(x, rl.Vector3Add(target, hold), stiffness)
 	}
 	for range clothIterations {
-		for i, e := range c.edges {
-			c.keepApart(e[0], e[1], c.edgeLength[i], 1)
-		}
-		for i, e := range c.bends {
-			c.keepApart(e[0], e[1], c.bendLength[i], bending)
-		}
+		c.keepAllApart(c.edges, c.edgeLength, 1)
+		c.keepAllApart(c.bends, c.bendLength, bending)
 		for i, p := range c.free {
 			target := c.stepTarget[p]
 			// Within its freedom of where the pose puts it, and not behind it.
@@ -269,35 +267,75 @@ func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bend
 	}
 }
 
+// clothPush is how far past its freedom a particle is taken to be pushed by
+// one collider into the reach of another (see reach).
+const clothPush = 0.03
+
 // reach works out which colliders each moving particle can touch this
 // frame. A particle stays within its freedom of where the pose puts it, and
 // that moves from lastTarget to target, so only a collider within that (and
-// as far again as a collider can push it) matters. Most particles are
-// nowhere near most limbs: this leaves each a handful to test, where every
-// constraint pass of every step would otherwise test them all.
+// clothPush more: one collider can push it into another) matters. Most
+// particles are nowhere near most limbs: this leaves each a few to test,
+// where every constraint pass of every step would otherwise test them all.
 func (c *clothMesh) reach(colliders []worldCapsule) {
-	var widest float32
-	for _, k := range colliders {
-		widest = max(widest, k.radius)
-	}
 	c.near = c.near[:0]
 	if len(c.nearEnd) != len(c.free) {
 		c.nearEnd = make([]int32, len(c.free))
+		c.within = make([]float32, len(c.free))
 	}
+	if len(c.free) == 0 {
+		return
+	}
+	// How far each particle can get from where the pose puts it, and the
+	// box they're all in: the colliders nowhere near it are left out first.
+	lo, hi := c.target[c.free[0]], c.target[c.free[0]]
+	var furthest float32
 	for i, p := range c.free {
 		x := c.target[p]
-		within := c.freedom[p] + widest + rl.Vector3Distance(c.lastTarget[p], x)
-		for j, k := range colliders {
-			r := k.radius + within
-			if x.X < min(k.a.X, k.b.X)-r || x.X > max(k.a.X, k.b.X)+r ||
-				x.Y < min(k.a.Y, k.b.Y)-r || x.Y > max(k.a.Y, k.b.Y)+r ||
-				x.Z < min(k.a.Z, k.b.Z)-r || x.Z > max(k.a.Z, k.b.Z)+r {
+		within := c.freedom[p] + clothPush + rl.Vector3Distance(c.lastTarget[p], x)
+		c.within[i] = within
+		furthest = max(furthest, within)
+		lo = rl.Vector3{X: min(lo.X, x.X), Y: min(lo.Y, x.Y), Z: min(lo.Z, x.Z)}
+		hi = rl.Vector3{X: max(hi.X, x.X), Y: max(hi.Y, x.Y), Z: max(hi.Z, x.Z)}
+	}
+	c.close = c.close[:0]
+	for j, k := range colliders {
+		r := k.radius + furthest
+		if hi.X < min(k.a.X, k.b.X)-r || lo.X > max(k.a.X, k.b.X)+r ||
+			hi.Y < min(k.a.Y, k.b.Y)-r || lo.Y > max(k.a.Y, k.b.Y)+r ||
+			hi.Z < min(k.a.Z, k.b.Z)-r || lo.Z > max(k.a.Z, k.b.Z)+r {
+			continue
+		}
+		c.close = append(c.close, closeCapsule{
+			index: int32(j), a: k.a, b: k.b, radius: k.radius,
+			lo: rl.Vector3{X: min(k.a.X, k.b.X) - k.radius, Y: min(k.a.Y, k.b.Y) - k.radius, Z: min(k.a.Z, k.b.Z) - k.radius},
+			hi: rl.Vector3{X: max(k.a.X, k.b.X) + k.radius, Y: max(k.a.Y, k.b.Y) + k.radius, Z: max(k.a.Z, k.b.Z) + k.radius},
+		})
+	}
+	for i, p := range c.free {
+		x, within := c.target[p], c.within[i]
+		for n := range c.close {
+			k := &c.close[n]
+			if x.X < k.lo.X-within || x.X > k.hi.X+within ||
+				x.Y < k.lo.Y-within || x.Y > k.hi.Y+within ||
+				x.Z < k.lo.Z-within || x.Z > k.hi.Z+within {
 				continue
 			}
-			c.near = append(c.near, int32(j))
+			if r := k.radius + within; rl.Vector3DistanceSqr(x, closestOnSegment(x, k.a, k.b)) >= r*r {
+				continue
+			}
+			c.near = append(c.near, k.index)
 		}
 		c.nearEnd[i] = int32(len(c.near))
 	}
+}
+
+// closeCapsule is a collider near a mesh, with its bounds.
+type closeCapsule struct {
+	index  int32
+	a, b   rl.Vector3
+	radius float32
+	lo, hi rl.Vector3
 }
 
 // collide pushes x, where free[i] is, out of the colliders it can reach (or
@@ -316,40 +354,43 @@ func (c *clothMesh) collide(i int, x, target rl.Vector3, colliders []worldCapsul
 	return x
 }
 
-// keepApart moves particles a and b the share k of the way back to the
-// distance the pose puts between them.
-func (c *clothMesh) keepApart(a, b int32, rest, k float32) {
-	wa, wb := c.mobility(a), c.mobility(b)
-	if wa+wb == 0 {
-		return
+// keepAllApart moves each of pairs the share k of the way back to the
+// distance the pose puts between them, rest; a pinned particle stays where
+// the pose has it. It's most of a step, so it's written out flat: calls and
+// vectors made along the way cost more than the sums, in the browser most
+// of all.
+func (c *clothMesh) keepAllApart(pairs [][2]int32, rest []float32, k float32) {
+	pos, freedom, pose := c.pos, c.freedom, c.stepTarget
+	for i, e := range pairs {
+		a, b := e[0], e[1]
+		moveA, moveB := freedom[a] > 0, freedom[b] > 0
+		if !moveA && !moveB {
+			continue
+		}
+		pa, pb := pos[a], pos[b]
+		if !moveA {
+			pa = pose[a]
+		}
+		if !moveB {
+			pb = pose[b]
+		}
+		dx, dy, dz := pb.X-pa.X, pb.Y-pa.Y, pb.Z-pa.Z
+		length := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
+		if length < 1e-6 {
+			continue
+		}
+		fix := k * (length - rest[i]) / length
+		switch {
+		case moveA && moveB:
+			fix /= 2
+			pos[a] = rl.Vector3{X: pa.X + dx*fix, Y: pa.Y + dy*fix, Z: pa.Z + dz*fix}
+			pos[b] = rl.Vector3{X: pb.X - dx*fix, Y: pb.Y - dy*fix, Z: pb.Z - dz*fix}
+		case moveA:
+			pos[a] = rl.Vector3{X: pa.X + dx*fix, Y: pa.Y + dy*fix, Z: pa.Z + dz*fix}
+		default:
+			pos[b] = rl.Vector3{X: pb.X - dx*fix, Y: pb.Y - dy*fix, Z: pb.Z - dz*fix}
+		}
 	}
-	pa, pb := c.pos[a], c.pos[b]
-	if wa == 0 {
-		pa = c.stepTarget[a]
-	}
-	if wb == 0 {
-		pb = c.stepTarget[b]
-	}
-	d := rl.Vector3Subtract(pb, pa)
-	length := rl.Vector3Length(d)
-	if length < 1e-6 {
-		return
-	}
-	fix := rl.Vector3Scale(d, k*(length-rest)/length/(wa+wb))
-	if wa > 0 {
-		c.pos[a] = rl.Vector3Add(pa, rl.Vector3Scale(fix, wa))
-	}
-	if wb > 0 {
-		c.pos[b] = rl.Vector3Subtract(pb, rl.Vector3Scale(fix, wb))
-	}
-}
-
-// mobility is 1 for a moving particle, 0 for a pinned one.
-func (c *clothMesh) mobility(p int32) float32 {
-	if c.freedom[p] > 0 {
-		return 1
-	}
-	return 0
 }
 
 // at is where particle p is: pinned ones are wherever the pose puts them.
