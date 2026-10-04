@@ -455,13 +455,19 @@ func moveCharacters(
 		}
 		v := cc.Velocity
 		v.X, v.Z = cc.Walk.X, cc.Walk.Z
-		if ch.c.Supported() && v.Y <= 0 {
+		if cc.Controlled {
+			v.Y = cc.Walk.Y
+		} else if cc.Grounded && v.Y <= 0 {
 			v.Y = ch.c.GroundVelocity()[1]
 		} else {
 			v = rl.Vector3Add(v, rl.Vector3Scale(g, dt))
 		}
 		ch.c.SetVelocity(v3(v))
-		ch.c.Update(dt, cc.StepHeight)
+		if cc.Controlled {
+			ch.c.UpdateControlled(dt)
+		} else {
+			ch.c.Update(dt, cc.StepHeight)
+		}
 	}
 }
 
@@ -516,8 +522,14 @@ func pullCharacters(q *illusion.Query3[CharacterController, character, transform
 		cc, ch, tr := query.Get()
 		tr.Translation = vec(ch.c.Position())
 		cc.Velocity = vec(ch.c.Velocity())
-		cc.Grounded = ch.c.Supported()
 		cc.GroundNormal = vec(ch.c.GroundNormal())
+		slope := cc.MaxSlope
+		if slope <= 0 {
+			slope = math.Pi / 4
+		}
+		// Jolt considers steep-ground contact supported too. Public Grounded
+		// means walkable support, so a vertical wall cannot act as a floor.
+		cc.Grounded = ch.c.Supported() && cc.GroundNormal.Y >= float32(math.Cos(float64(slope)))-.001
 	}
 }
 

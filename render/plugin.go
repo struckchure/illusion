@@ -49,10 +49,11 @@ func (Plugin) Build(app *illusion.App) {
 	app.InitResource(
 		illusion.R(&ClearColor{Color: color.RGBA{R: 24, G: 24, B: 28, A: 255}}),
 		illusion.R(&AmbientLight{Color: rl.White, Brightness: 0.25}),
+		illusion.R(&Shader{}),
 	)
 	app.InsertResource(illusion.R(&renderer{}), illusion.R(&View3D{}))
 
-	app.AddSystems(illusion.PreStartup, illusion.Fn2(initRenderer).Named("render.init"))
+	app.AddSystems(illusion.PreStartup, illusion.Fn3(initRenderer).Named("render.init"))
 	app.ConfigureSets(illusion.Render,
 		Begin3D.After(Begin),
 		Draw3D.After(Begin3D).RunIf(illusion.Cond1(cameraActive)),
@@ -66,7 +67,7 @@ func (Plugin) Build(app *illusion.App) {
 	app.AddSystems(illusion.Render,
 		illusion.Fn1(beginFrame).InSet(Begin).Named("render.beginFrame"),
 		illusion.Fn5(beginCamera).InSet(Begin3D).Named("render.beginCamera"),
-		illusion.Fn5(drawMeshes).InSet(Draw3D).Named("render.drawMeshes"),
+		illusion.Fn6(drawMeshes).InSet(Draw3D).Named("render.drawMeshes"),
 		illusion.Fn8(drawModels).InSet(Draw3D).Named("render.drawModels"),
 		illusion.Fn1(endCamera).InSet(End3D).Named("render.endCamera"),
 		illusion.Fn0(rl.EndDrawing).InSet(End).Named("render.endFrame"),
@@ -83,6 +84,12 @@ func (Plugin) Cleanup(app *illusion.App) {
 		// has been unloaded with) the Texture store.
 		r.material.GetMap(rl.MapDiffuse).Texture = r.defaultTexture
 		rl.UnloadMaterial(r.material)
+		for s, p := range r.programs {
+			if s != r.shader {
+				rl.UnloadShader(p.shader)
+			}
+		}
+		r.programs = nil
 		r.ready = false
 	}
 }
@@ -96,26 +103,85 @@ type renderer struct {
 
 	textures *asset.Assets[Texture]
 
-	locLightDir   int32
-	locLightColor int32
-	locAmbient    int32
-	locUnlit      int32
+	// shader is the one everything is drawn with, and programs the compiled
+	// shaders: that one and those of the passes.
+	shader   *Shader
+	programs map[*Shader]*program
+	locUnlit int32
+
+	// This frame's light and camera, for the shaders that take them.
+	lightDir, lightColor, ambient, viewPos rl.Vector3
 
 	posed map[*rl.Mesh]appliedPose // last pose applied to each model, by its meshes
 }
 
-func initRenderer(res *illusion.Res[renderer], textures *illusion.Res[asset.Assets[Texture]]) {
+func initRenderer(res *illusion.Res[renderer], textures *illusion.Res[asset.Assets[Texture]], shader *illusion.Res[Shader]) {
 	r := res.Get()
 	r.textures = textures.Get()
-	shader := rl.LoadShaderFromMemory(litVertexShader, litFragmentShader)
+	r.shader = shader.Get()
+	p := r.program(r.shader)
 	r.material = rl.LoadMaterialDefault()
-	r.material.Shader = shader
+	r.material.Shader = p.shader
 	r.defaultTexture = r.material.GetMap(rl.MapDiffuse).Texture
-	r.locLightDir = rl.GetShaderLocation(shader, "lightDir")
-	r.locLightColor = rl.GetShaderLocation(shader, "lightColor")
-	r.locAmbient = rl.GetShaderLocation(shader, "ambient")
-	r.locUnlit = rl.GetShaderLocation(shader, "unlit")
+	r.locUnlit = p.loc("unlit")
 	r.ready = true
+}
+
+// program is a compiled Shader and its uniform locations, by name.
+type program struct {
+	shader rl.Shader
+	locs   map[string]int32
+}
+
+func (p *program) loc(name string) int32 {
+	loc, ok := p.locs[name]
+	if !ok {
+		loc = rl.GetShaderLocation(p.shader, name)
+		p.locs[name] = loc
+	}
+	return loc
+}
+
+// program returns s compiled, compiling it the first time.
+func (r *renderer) program(s *Shader) *program {
+	if p := r.programs[s]; p != nil {
+		return p
+	}
+	vertex, fragment := s.Vertex, s.Fragment
+	if vertex == "" {
+		vertex = litVertexShader
+	}
+	if fragment == "" {
+		fragment = litFragmentShader
+	}
+	p := &program{
+		shader: rl.LoadShaderFromMemory(vertexHeader+"\n"+vertex, fragmentHeader+"\n"+fragment),
+		locs:   map[string]int32{},
+	}
+	if r.programs == nil {
+		r.programs = map[*Shader]*program{}
+	}
+	r.programs[s] = p
+	return p
+}
+
+// uniformTypes are the types of a Shader's uniforms, by their length.
+var uniformTypes = [...]rl.ShaderUniformDataType{1: rl.ShaderUniformFloat, rl.ShaderUniformVec2, rl.ShaderUniformVec3, rl.ShaderUniformVec4}
+
+// use sends s this frame's light and camera and its own uniforms, and
+// returns it compiled.
+func (r *renderer) use(s *Shader) rl.Shader {
+	p := r.program(s)
+	setVec3(p.shader, p.loc("lightDir"), r.lightDir)
+	setVec3(p.shader, p.loc("lightColor"), r.lightColor)
+	setVec3(p.shader, p.loc("ambient"), r.ambient)
+	setVec3(p.shader, p.loc("viewPos"), r.viewPos)
+	for name, v := range s.Uniforms {
+		if loc := p.loc(name); loc >= 0 && len(v) >= 1 && len(v) <= 4 {
+			rl.SetShaderValue(p.shader, loc, v, uniformTypes[len(v)])
+		}
+	}
+	return p.shader
 }
 
 func cameraActive(r *illusion.Res[renderer]) bool {
@@ -169,12 +235,10 @@ func beginCamera(
 		lightColor = rgb(light.Color, 1)
 	}
 	a := ambient.Get()
-	shader := r.material.Shader
-	setVec3(shader, r.locLightDir, lightDir)
-	setVec3(shader, r.locLightColor, lightColor)
-	setVec3(shader, r.locAmbient, rgb(a.Color, a.Brightness))
-
 	position := camTransform.Translation()
+	r.lightDir, r.lightColor, r.ambient, r.viewPos = lightDir, lightColor, rgb(a.Color, a.Brightness), position
+	r.use(r.shader)
+
 	fovy := cam.Fovy
 	if fovy == 0 {
 		fovy = 45
@@ -212,6 +276,7 @@ func drawMeshes(
 	materials *illusion.Res[asset.Assets[StandardMaterial]],
 	q *illusion.Query2Where[Mesh3d, transform.GlobalTransform, illusion.Without[Hidden]],
 	withMaterial *illusion.Query1[MeshMaterial3d],
+	withPasses *illusion.Query1[Passes],
 ) {
 	r := res.Get()
 	meshStore, materialStore := meshes.Get(), materials.Get()
@@ -229,6 +294,24 @@ func drawMeshes(
 		}
 		r.apply(mat)
 		rl.DrawMesh(mesh.Mesh, r.material, g.Matrix)
+
+		if passes, ok := withPasses.Get(query.Entity()); ok {
+			for _, pass := range *passes {
+				// A Mesh3d is one mesh, index 0.
+				if pass.Shader == nil || pass.Skip[0] {
+					continue
+				}
+				if pass.CullFront {
+					rl.SetCullFace(cullFaceFront)
+				}
+				passMaterial := r.material
+				passMaterial.Shader = r.use(pass.Shader)
+				rl.DrawMesh(mesh.Mesh, passMaterial, g.Matrix)
+				if pass.CullFront {
+					rl.SetCullFace(cullFaceBack)
+				}
+			}
+		}
 	}
 }
 
@@ -273,50 +356,78 @@ func drawModels(
 		}
 		meshes := model.GetMeshes()
 		mp, _ := parts.q.Get(query.Entity())
-
-		if override := materialFor(withMaterial, materialStore, query.Entity()); override != nil {
-			r.apply(override)
-			for i, mesh := range meshes {
-				if hidden, _ := meshPart(mp, i); !hidden {
-					rl.DrawMesh(mesh, r.material, matrix)
-				}
-			}
-			continue
-		}
-
-		r.setUnlit(false)
+		override := materialFor(withMaterial, materialStore, query.Entity())
 		own := model.GetMaterials()
 		meshMaterial := unsafe.Slice(model.MeshMaterial, model.MeshCount)
-		for i, mesh := range meshes {
-			hidden, swap := meshPart(mp, i)
-			if hidden {
-				continue
+
+		// draw draws the meshes that aren't hidden or skipped, with shader.
+		draw := func(shader rl.Shader, skip map[int]bool) {
+			if override != nil {
+				r.apply(override)
+			} else {
+				r.setUnlit(false)
 			}
-			mat := own[meshMaterial[i]]
-			mat.Shader = r.material.Shader // light the model's own materials
-			if t := textureStore.Get(swap); t != nil {
-				// The maps are shared by every entity drawing this model, so
-				// swap the texture for this draw only.
-				diffuse := mat.GetMap(rl.MapDiffuse)
-				own := diffuse.Texture
-				diffuse.Texture = t.Texture2D
+			for i, mesh := range meshes {
+				hidden, swap := meshPart(mp, i)
+				if hidden || skip[i] {
+					continue
+				}
+				if override != nil {
+					mat := r.material
+					mat.Shader = shader
+					rl.DrawMesh(mesh, mat, matrix)
+					continue
+				}
+				mat := own[meshMaterial[i]]
+				mat.Shader = shader // light the model's own materials
+				if t := textureStore.Get(swap); t != nil {
+					// The maps are shared by every entity drawing this model, so
+					// swap the texture for this draw only.
+					diffuse := mat.GetMap(rl.MapDiffuse)
+					own := diffuse.Texture
+					diffuse.Texture = t.Texture2D
+					rl.DrawMesh(mesh, mat, matrix)
+					diffuse.Texture = own
+					continue
+				}
 				rl.DrawMesh(mesh, mat, matrix)
-				diffuse.Texture = own
-				continue
 			}
-			rl.DrawMesh(mesh, mat, matrix)
+		}
+		draw(r.material.Shader, nil)
+
+		// The passes, while the meshes still hold this entity's pose.
+		if passes, ok := parts.passes.Get(query.Entity()); ok {
+			for _, pass := range *passes {
+				if pass.Shader == nil {
+					continue
+				}
+				if pass.CullFront {
+					rl.SetCullFace(cullFaceFront)
+				}
+				draw(r.use(pass.Shader), pass.Skip)
+				if pass.CullFront {
+					rl.SetCullFace(cullFaceBack)
+				}
+			}
 		}
 	}
 }
 
+// rlgl's face culling modes.
+const (
+	cullFaceFront = 0
+	cullFaceBack  = 1
+)
+
 // modelParts is drawModels' view of ModelParts and the textures they swap
-// in, and of Cloth and the time it moves by: one parameter to stay within
-// Fn8.
+// in, of Cloth and the time it moves by, and of Passes: one parameter to
+// stay within Fn8.
 type modelParts struct {
 	q        illusion.Query1[ModelParts]
 	textures illusion.Res[asset.Assets[Texture]]
 	cloth    illusion.Query1[Cloth]
 	time     illusion.Res[illusion.Time]
+	passes   illusion.Query1[Passes]
 }
 
 func (p *modelParts) InitParam(w *ecs.World) {
@@ -324,6 +435,7 @@ func (p *modelParts) InitParam(w *ecs.World) {
 	p.textures.InitParam(w)
 	p.cloth.InitParam(w)
 	p.time.InitParam(w)
+	p.passes.InitParam(w)
 }
 
 // meshPart reports whether parts hides mesh i, and the texture it swaps in

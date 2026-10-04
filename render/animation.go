@@ -22,6 +22,7 @@ type Animations struct {
 	FrameRate float32
 
 	byName map[string]int
+	ends   []float32 // the keyframe each clip holds once it's played through (see end)
 }
 
 // Clip returns the index of the clip called name.
@@ -58,8 +59,9 @@ func (a *Animations) frameRate() float32 {
 }
 
 // frame returns the (fractional) keyframe of clip i after t seconds. Looping
-// clips wrap at their last keyframe, which exporters make equal to the first,
-// so raylib never interpolates from the last keyframe back to the first.
+// clips wrap at their last keyframe, which is equal to the first, so raylib
+// never interpolates from the last keyframe back to the first. Clips played
+// once hold their end pose (see end).
 func (a *Animations) frame(i int, t float32, once bool) float32 {
 	last := float32(max(a.Clips[i].KeyframeCount-1, 0))
 	if last == 0 {
@@ -67,9 +69,36 @@ func (a *Animations) frame(i int, t float32, once bool) float32 {
 	}
 	f := t * a.frameRate()
 	if once {
-		return min(f, last)
+		return min(f, a.end(i))
 	}
 	return float32(math.Mod(float64(f), float64(last)))
+}
+
+// end is the keyframe clip i holds once it's played through: its last, or
+// the one before when the last is a copy of the first. raylib samples a glTF
+// clip's final keyframe past its last key, which gives the first pose again:
+// right for a loop, but a clip that ends somewhere else would snap back to
+// where it started.
+func (a *Animations) end(i int) float32 {
+	if len(a.ends) != len(a.Clips) {
+		a.ends = make([]float32, len(a.Clips))
+		for j := range a.Clips {
+			c := &a.Clips[j]
+			last := int(c.KeyframeCount) - 1
+			a.ends[j] = float32(max(last, 0))
+			if last < 2 || c.KeyframePoses == nil || c.BoneCount == 0 {
+				continue
+			}
+			wrapped := true
+			for bone := 0; bone < int(c.BoneCount) && wrapped; bone++ {
+				wrapped = c.GetFramePose(last, bone) == c.GetFramePose(0, bone)
+			}
+			if wrapped {
+				a.ends[j] = float32(last - 1)
+			}
+		}
+	}
+	return a.ends[i]
 }
 
 func loadAnimations(path string) (Animations, error) {
@@ -101,6 +130,14 @@ type AnimationPlayer struct {
 	Speed float32
 	// Paused holds the current pose.
 	Paused bool
+	// ManualTime lets Seek drive the current pose while crossfades still advance.
+	// Use for animation synchronized to physics displacement or a fixed-step clock.
+	ManualTime bool
+
+	// Pose optionally overrides the sampled skeleton in model space. Supply one
+	// transform per bone after Animate, before attachments and drawing. Clothing
+	// can share this read-only slice; nil retains ordinary clip playback.
+	Pose []rl.Transform
 
 	current, previous playback
 	fade, fadeLength  float32 // crossfade progress and length, in seconds
@@ -193,13 +230,18 @@ type AnimationFinished struct {
 // bone attachments. It runs before transform propagation.
 const Animate illusion.SystemSet = "render.Animate"
 
+// AdvanceAnimations and AttachBones split Animate so pose modifiers can run
+// between clip sampling and attachments. Put modifiers in Animate as well.
+const AdvanceAnimations illusion.SystemSet = "render.AdvanceAnimations"
+const AttachBones illusion.SystemSet = "render.AttachBones"
+
 func buildAnimation(app *illusion.App) {
 	asset.RegisterLoader(app, loadAnimations, unloadAnimations)
 	illusion.AddEvent[AnimationFinished](app)
 	app.ConfigureSets(illusion.PostUpdate, Animate.Before(transform.Propagate))
 	app.AddSystems(illusion.PostUpdate, illusion.Chain(
-		illusion.Fn4(advanceAnimations).Named("render.advanceAnimations"),
-		illusion.Fn6(attachToBones).Named("render.attachToBones"),
+		illusion.Fn4(advanceAnimations).Named("render.advanceAnimations").InSet(AdvanceAnimations),
+		illusion.Fn6(attachToBones).Named("render.attachToBones").InSet(AttachBones),
 	).InSet(Animate))
 }
 
@@ -223,7 +265,9 @@ func advanceAnimations(
 			step *= p.Speed
 		}
 		if i, ok := a.Clip(p.current.clip); ok {
-			p.current.time = advance(p.current, step, a.Duration(i))
+			if !p.ManualTime {
+				p.current.time = advance(p.current, step, a.Duration(i))
+			}
 			if p.current.once && !p.finished && p.current.time >= a.Duration(i) {
 				p.finished = true
 				finished.Send(AnimationFinished{Entity: e, Clip: p.current.clip})
@@ -233,7 +277,7 @@ func advanceAnimations(
 			if i, ok := a.Clip(p.previous.clip); ok {
 				p.previous.time = advance(p.previous, step, a.Duration(i))
 			}
-			p.fade += step
+			p.fade += dt // blending follows wall time, independently of stride speed
 			if p.fade >= p.fadeLength {
 				p.fade, p.fadeLength = 0, 0
 			}
@@ -268,6 +312,8 @@ func (a *Animations) fits(model *rl.Model, i int) bool {
 // appliedPose is what poseModel last applied to a model, so it can skip
 // re-skinning when nothing changed.
 type appliedPose struct {
+	custom                  bool
+	scratch                 *poseScratch
 	anims                   *Animations
 	cur, prev               int
 	frame, prevFrame, blend float32
@@ -277,11 +323,22 @@ type appliedPose struct {
 // nothing if the clip isn't loaded or doesn't fit the model's skeleton, or if
 // last (keyed by the model's meshes) shows the model already holds this pose.
 func poseModel(model rl.Model, p *AnimationPlayer, a *Animations, last map[*rl.Mesh]appliedPose) {
+	if len(p.Pose) > 0 && len(p.Pose) == int(model.Skeleton.BoneCount) {
+		cached := last[model.Meshes]
+		if cached.scratch == nil {
+			cached.scratch = &poseScratch{}
+		}
+		applyCustomPose(model, p.Pose, cached.scratch)
+		// Mark this as custom, so a following ordinary/shared-model draw
+		// cannot reuse its old animation. Keep browser skinning buffers.
+		last[model.Meshes] = appliedPose{custom: true, scratch: cached.scratch}
+		return
+	}
 	cur, ok := a.Clip(p.current.clip)
 	if !ok || !a.fits(&model, cur) {
 		return
 	}
-	want := appliedPose{anims: a, cur: cur, prev: -1, frame: a.frame(cur, p.current.time, p.current.once)}
+	want := appliedPose{anims: a, cur: cur, prev: -1, frame: a.frame(cur, p.current.time, p.current.once), scratch: last[model.Meshes].scratch}
 	if p.fadeLength > 0 {
 		if prev, ok := a.Clip(p.previous.clip); ok && a.fits(&model, prev) {
 			want.prev, want.prevFrame = prev, a.frame(prev, p.previous.time, p.previous.once)

@@ -173,6 +173,9 @@ type CharacterController struct {
 
 	// Walk is the desired horizontal velocity (Y is ignored).
 	Walk rl.Vector3
+	// Controlled disables gravity and ground snapping, and includes Walk.Y.
+	// Use for ladders and collision-tested traversal; false keeps normal walking.
+	Controlled bool
 	// Velocity is the character's velocity after the last step.
 	Velocity rl.Vector3
 	// Grounded reports whether the character stood on walkable ground after

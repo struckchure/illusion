@@ -5,21 +5,30 @@ package render
 // defaults, so raylib binds mvp, matModel, matNormal, colDiffuse and texture0.
 // The GLSL version header depends on the platform: see shader_gl.go and
 // shader_js.go.
+//
+// A game's own [Shader] is given the same: the attributes vertexPosition,
+// vertexTexCoord, vertexNormal and vertexColor, raylib's uniforms, and
+// lightDir (the way the light shines), lightColor, ambient, unlit (above 0.5
+// for a StandardMaterial that is Unlit) and viewPos (the camera's position),
+// for those it declares.
 
-const litVertexShader = vertexHeader + `
+const litVertexShader = `
 in vec3 vertexPosition;
 in vec2 vertexTexCoord;
 in vec3 vertexNormal;
 in vec4 vertexColor;
 
 uniform mat4 mvp;
+uniform mat4 matModel;
 uniform mat4 matNormal;
 
+out vec3 fragPosition;
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragNormal;
 
 void main() {
+    fragPosition = vec3(matModel * vec4(vertexPosition, 1.0));
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
     fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));
@@ -27,7 +36,7 @@ void main() {
 }
 `
 
-const litFragmentShader = fragmentHeader + `
+const litFragmentShader = `
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragNormal;

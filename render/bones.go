@@ -108,6 +108,32 @@ func boneName(name [32]int8) string {
 // state, the way poseModel's raylib calls do, so attachments line up with the
 // drawn mesh.
 func bonePose(model *rl.Model, p *AnimationPlayer, a *Animations, bone int) (rl.Transform, bool) {
+	if len(p.Pose) == int(model.Skeleton.BoneCount) && bone >= 0 && bone < len(p.Pose) {
+		return p.Pose[bone], true
+	}
+	return clipBonePose(model, p, a, bone)
+}
+
+// SamplePose samples the clips and their current crossfade, ignoring Pose.
+// Reuse dst between frames, then modify the result and assign it to Pose.
+func (p *AnimationPlayer) SamplePose(model *rl.Model, a *Animations, dst []rl.Transform) []rl.Transform {
+	cur, ok := a.Clip(p.current.clip)
+	if !ok || !a.fits(model, cur) {
+		return nil
+	}
+	n := int(model.Skeleton.BoneCount)
+	if cap(dst) < n {
+		dst = make([]rl.Transform, n)
+	} else {
+		dst = dst[:n]
+	}
+	for i := range dst {
+		dst[i], _ = clipBonePose(model, p, a, i)
+	}
+	return dst
+}
+
+func clipBonePose(model *rl.Model, p *AnimationPlayer, a *Animations, bone int) (rl.Transform, bool) {
 	cur, ok := a.Clip(p.current.clip)
 	if !ok || !a.fits(model, cur) {
 		return rl.Transform{}, false

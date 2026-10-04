@@ -84,17 +84,24 @@ type clothState struct {
 // clothMesh is one mesh's simulation. Vertices at the same bind position
 // share a particle.
 type clothMesh struct {
-	particle []int32   // vertex -> particle
-	first    []int32   // particle -> one of its vertices
-	freedom  []float32 // particle -> how far it can stray
-	edges    [][2]int32
-	bends    [][2]int32 // the far corners of each pair of triangles sharing an edge
-	free     []int32    // the particles that move
+	particle               []int32   // vertex -> particle
+	first                  []int32   // particle -> one of its vertices
+	freedom                []float32 // particle -> how far it can stray
+	edges                  [][2]int32
+	bends                  [][2]int32 // the far corners of each pair of triangles sharing an edge
+	edgeLength, bendLength []float32  // rest lengths for the current physics pose
+	stepTarget             []rl.Vector3
+	drawPosition           []rl.Vector3
+	rotations              []rl.Quaternion
+	free                   []int32 // the particles that move
 
-	pos, prev          []rl.Vector3 // particles, world space
-	target, lastTarget []rl.Vector3 // where the pose puts each particle, world space
-	normal             []rl.Vector3 // the posed surface's normal at each moving particle, world space
-	started            bool
+	drawPrev, drawOffset   []rl.Vector3 // displacement from the pose at the last two physics steps
+	triangles              []int32      // triangle corners as welded particle indices
+	poseNormal, drawNormal []rl.Vector3 // area-weighted normals before and after deformation
+	pos, prev              []rl.Vector3 // particles, world space
+	target, lastTarget     []rl.Vector3 // where the pose puts each particle, world space
+	normal                 []rl.Vector3 // the posed surface's normal at each moving particle, world space
+	started                bool
 }
 
 // newClothMesh builds the simulation of a mesh with vertices (bind
@@ -150,7 +157,19 @@ func newClothMesh(vertices []rl.Vector3, triangles []int32, freedom []float32) *
 			c.free = append(c.free, int32(p))
 		}
 	}
+	for _, v := range triangles {
+		c.triangles = append(c.triangles, c.particle[v])
+	}
 	n := len(c.first)
+	c.edgeLength = make([]float32, len(c.edges))
+	c.bendLength = make([]float32, len(c.bends))
+	c.stepTarget = make([]rl.Vector3, n)
+	c.drawPosition = make([]rl.Vector3, n)
+	c.rotations = make([]rl.Quaternion, n)
+	c.drawPrev = make([]rl.Vector3, n)
+	c.drawOffset = make([]rl.Vector3, n)
+	c.poseNormal = make([]rl.Vector3, n)
+	c.drawNormal = make([]rl.Vector3, n)
 	c.pos = make([]rl.Vector3, n)
 	c.prev = make([]rl.Vector3, n)
 	c.target = make([]rl.Vector3, n)
@@ -200,12 +219,21 @@ type worldCapsule struct {
 // step advances the simulation by h seconds, the targets moving from
 // lastTarget to target over the step's share t of the frame.
 func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bending float32, colliders []worldCapsule) {
+	for p := range c.first {
+		c.stepTarget[p] = c.targetAt(int32(p), t)
+	}
+	for i, e := range c.edges {
+		c.edgeLength[i] = rl.Vector3Distance(c.stepTarget[e[0]], c.stepTarget[e[1]])
+	}
+	for i, e := range c.bends {
+		c.bendLength[i] = rl.Vector3Distance(c.stepTarget[e[0]], c.stepTarget[e[1]])
+	}
 	g := rl.Vector3Scale(gravity, h*h)
 	// The pull back to shape aims above the pose by as much as gravity
 	// would drag the cloth below it at rest: the pose is how it hangs.
 	hold := rl.Vector3Scale(g, -(1-stiffness)/stiffness)
 	for _, p := range c.free {
-		target := rl.Vector3Lerp(c.lastTarget[p], c.target[p], t)
+		target := c.stepTarget[p]
 		x := c.pos[p]
 		v := rl.Vector3Scale(rl.Vector3Subtract(x, c.prev[p]), keep)
 		c.prev[p] = x
@@ -213,14 +241,14 @@ func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bend
 		c.pos[p] = rl.Vector3Lerp(x, rl.Vector3Add(target, hold), stiffness)
 	}
 	for range clothIterations {
-		for _, e := range c.edges {
-			c.keepApart(e[0], e[1], t, 1)
+		for i, e := range c.edges {
+			c.keepApart(e[0], e[1], c.edgeLength[i], 1)
 		}
-		for _, e := range c.bends {
-			c.keepApart(e[0], e[1], t, bending)
+		for i, e := range c.bends {
+			c.keepApart(e[0], e[1], c.bendLength[i], bending)
 		}
 		for _, p := range c.free {
-			target := c.targetAt(p, t)
+			target := c.stepTarget[p]
 			// Within its freedom of where the pose puts it, and not behind it.
 			off := rl.Vector3Subtract(c.pos[p], target)
 			if rl.Vector3Length(off) > c.freedom[p] {
@@ -238,18 +266,23 @@ func (c *clothMesh) step(h, t float32, gravity rl.Vector3, keep, stiffness, bend
 
 // keepApart moves particles a and b the share k of the way back to the
 // distance the pose puts between them.
-func (c *clothMesh) keepApart(a, b int32, t, k float32) {
+func (c *clothMesh) keepApart(a, b int32, rest, k float32) {
 	wa, wb := c.mobility(a), c.mobility(b)
 	if wa+wb == 0 {
 		return
 	}
-	pa, pb := c.at(a, t), c.at(b, t)
+	pa, pb := c.pos[a], c.pos[b]
+	if wa == 0 {
+		pa = c.stepTarget[a]
+	}
+	if wb == 0 {
+		pb = c.stepTarget[b]
+	}
 	d := rl.Vector3Subtract(pb, pa)
 	length := rl.Vector3Length(d)
 	if length < 1e-6 {
 		return
 	}
-	rest := rl.Vector3Distance(c.targetAt(a, t), c.targetAt(b, t))
 	fix := rl.Vector3Scale(d, k*(length-rest)/length/(wa+wb))
 	if wa > 0 {
 		c.pos[a] = rl.Vector3Add(pa, rl.Vector3Scale(fix, wa))
@@ -283,13 +316,21 @@ func (c *clothMesh) targetAt(p int32, t float32) rl.Vector3 {
 // goes out towards target, where the pose puts it.
 func collide(x, target rl.Vector3, colliders []worldCapsule) rl.Vector3 {
 	for _, k := range colliders {
-		closest := closestOnSegment(x, k.a, k.b)
-		d := rl.Vector3Subtract(x, closest)
-		dist := rl.Vector3Length(d)
+		// Most particles are nowhere near most limbs. Reject their capsule
+		// bounds before doing segment projection and square roots.
 		r := k.radius
-		if dist >= r {
+		if x.X < min(k.a.X, k.b.X)-r || x.X > max(k.a.X, k.b.X)+r ||
+			x.Y < min(k.a.Y, k.b.Y)-r || x.Y > max(k.a.Y, k.b.Y)+r ||
+			x.Z < min(k.a.Z, k.b.Z)-r || x.Z > max(k.a.Z, k.b.Z)+r {
 			continue
 		}
+		closest := closestOnSegment(x, k.a, k.b)
+		d := rl.Vector3Subtract(x, closest)
+		distSq := rl.Vector3LengthSqr(d)
+		if distSq >= r*r {
+			continue
+		}
+		dist := float32(math.Sqrt(float64(distSq)))
 		if dist < 1e-6 {
 			d, dist = rl.Vector3Subtract(target, closest), rl.Vector3Distance(target, closest)
 			if dist < 1e-6 {
@@ -356,12 +397,7 @@ func simulate(cloth *Cloth, model *rl.Model, p *AnimationPlayer, a *Animations, 
 	}
 	colliders := placeColliders(cloth.Colliders, bones, matrix, thickness)
 
-	s.spare += dt
-	steps := int(s.spare / clothStep)
-	s.spare -= float32(steps) * clothStep
-	if steps > clothMaxSteps {
-		steps, s.spare = clothMaxSteps, 0
-	}
+	frame := s.schedule(dt)
 	turn := matrix
 	turn.M12, turn.M13, turn.M14 = 0, 0, 0
 	back := rl.MatrixInvert(matrix)
@@ -404,16 +440,33 @@ func simulate(cloth *Cloth, model *rl.Model, p *AnimationPlayer, a *Animations, 
 				copy(c.pos, c.target)
 				copy(c.prev, c.target)
 				copy(c.lastTarget, c.target)
+				clear(c.drawPrev)
+				clear(c.drawOffset)
 				c.started = true
 			}
-			for k := range steps {
-				c.step(clothStep, float32(k+1)/float32(steps), gravity, 1-damping, stiffness, bending, colliders)
+			for k := range frame.steps {
+				t := frame.first + float32(k)*frame.stride
+				copy(c.drawPrev, c.drawOffset)
+				c.step(clothStep, t, gravity, 1-damping, stiffness, bending, colliders)
+				for _, p := range c.free {
+					c.drawOffset[p] = rl.Vector3Subtract(c.pos[p], c.targetAt(p, t))
+				}
 			}
-			// The moved particles back into the model's space, for drawing.
+			// Interpolate displacement, not world position: pinned and loose
+			// vertices follow the same current pose even between physics ticks.
+			if pm.normals != nil {
+				c.surfaceNormals(c.poseNormal, pm.positions)
+			}
+			for _, p := range c.free {
+				c.drawPosition[p] = rl.Vector3Transform(c.drawAt(p, frame.alpha, colliders), back)
+			}
 			for v, p := range c.particle {
 				if c.freedom[p] > 0 {
-					pm.positions[v] = rl.Vector3Transform(c.pos[p], back)
+					pm.positions[v] = c.drawPosition[p]
 				}
+			}
+			if pm.normals != nil {
+				c.deformNormals(pm.positions, pm.normals)
 			}
 		}
 
@@ -423,6 +476,68 @@ func simulate(cloth *Cloth, model *rl.Model, p *AnimationPlayer, a *Animations, 
 		}
 	}
 	return true
+}
+
+// clothFrame samples the animated targets at the actual fixed-step times.
+// alpha blends the two most recent displacements for presentation.
+type clothFrame struct {
+	steps                int
+	first, stride, alpha float32
+}
+
+func (s *clothState) schedule(dt float32) clothFrame {
+	dt = max(0, dt)
+	s.spare += dt
+	steps := int(s.spare / clothStep)
+	s.spare -= float32(steps) * clothStep
+	steps = min(steps, clothMaxSteps)
+	f := clothFrame{steps: steps, alpha: s.spare / clothStep}
+	if dt > 0 && steps > 0 {
+		f.stride = clothStep / dt
+		f.first = 1 - (s.spare+float32(steps-1)*clothStep)/dt
+	}
+	return f
+}
+
+func (c *clothMesh) drawAt(p int32, alpha float32, colliders []worldCapsule) rl.Vector3 {
+	off := rl.Vector3Lerp(c.drawPrev[p], c.drawOffset[p], alpha)
+	if length := rl.Vector3Length(off); length > c.freedom[p] {
+		off = rl.Vector3Scale(off, c.freedom[p]/length)
+	}
+	if inward := rl.Vector3DotProduct(off, c.normal[p]); inward < 0 {
+		off = rl.Vector3Subtract(off, rl.Vector3Scale(c.normal[p], inward))
+	}
+	return collide(rl.Vector3Add(c.target[p], off), c.target[p], colliders)
+}
+
+// surfaceNormals accumulates triangle areas across welded UV seams.
+func (c *clothMesh) surfaceNormals(out, positions []rl.Vector3) {
+	clear(out)
+	for i := 0; i+2 < len(c.triangles); i += 3 {
+		a, b, d := c.triangles[i], c.triangles[i+1], c.triangles[i+2]
+		pa, pb, pd := positions[c.first[a]], positions[c.first[b]], positions[c.first[d]]
+		n := rl.Vector3CrossProduct(rl.Vector3Subtract(pb, pa), rl.Vector3Subtract(pd, pa))
+		out[a] = rl.Vector3Add(out[a], n)
+		out[b] = rl.Vector3Add(out[b], n)
+		out[d] = rl.Vector3Add(out[d], n)
+	}
+}
+
+// Rotate the authored shading normals by the cloth's surface deformation;
+// this preserves their smoothing and detail instead of flattening the mesh.
+func (c *clothMesh) deformNormals(positions, normals []rl.Vector3) {
+	c.surfaceNormals(c.drawNormal, positions)
+	for _, p := range c.free {
+		c.rotations[p] = rl.QuaternionIdentity()
+		if rl.Vector3LengthSqr(c.poseNormal[p]) >= 1e-12 && rl.Vector3LengthSqr(c.drawNormal[p]) >= 1e-12 {
+			c.rotations[p] = rl.QuaternionFromVector3ToVector3(rl.Vector3Normalize(c.poseNormal[p]), rl.Vector3Normalize(c.drawNormal[p]))
+		}
+	}
+	for v, p := range c.particle {
+		if c.freedom[p] > 0 {
+			normals[v] = rl.Vector3Normalize(rl.Vector3RotateByQuaternion(normals[v], c.rotations[p]))
+		}
+	}
 }
 
 // vboNormalSlot is where a mesh's normals are in raylib's Mesh.vboId.

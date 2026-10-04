@@ -98,6 +98,34 @@ func TestAnimationOnceFinishesAndHolds(t *testing.T) {
 	}
 }
 
+// raylib's glTF loader ends every clip on a copy of its first keyframe. A
+// clip played once holds the pose before that copy, not its start.
+func TestAnimationOnceHoldsEndPoseOfWrappedClip(t *testing.T) {
+	poses := func(ys ...float32) (rl.ModelAnimation, []rl.ModelAnimPose) {
+		frames := make([]rl.ModelAnimPose, len(ys))
+		for i, y := range ys {
+			frames[i] = &rl.Transform{Translation: rl.Vector3{Y: y}, Rotation: rl.QuaternionIdentity(), Scale: rl.Vector3One()}
+		}
+		c := clip("Climb", int32(len(ys)))
+		c.BoneCount, c.KeyframePoses = 1, &frames[0]
+		return c, frames
+	}
+	wrapped, keepA := poses(0, 1, 2, 3, 0)
+	whole, keepB := poses(0, 1, 2, 3, 4)
+	_, _ = keepA, keepB
+	a := Animations{Clips: []rl.ModelAnimation{wrapped, whole}}
+	for i, want := range []float32{3, 4} {
+		f := a.frame(i, 10, true)
+		if y := sample(a.Clips[i], f, 0, true).Translation.Y; y != want {
+			t.Fatalf("clip %d held at frame %v, height %v; want its end pose, %v", i, f, y, want)
+		}
+	}
+	// Looping, both still wrap at the last keyframe.
+	if f := a.frame(0, 4.5/60, false); !near(f, 0.5) {
+		t.Fatalf("looping frame %v, want 0.5", f)
+	}
+}
+
 func TestAnimationFadeAndSpeed(t *testing.T) {
 	app, e, _ := newAnimApp(t, func(p *AnimationPlayer) { p.Play("Walk") })
 	run(app, 0.5)
@@ -176,5 +204,28 @@ func TestAnimationInterruptedFadeKeepsDominantClip(t *testing.T) {
 	p.PlayOnce("Jump").FadeIn(0.2)
 	if p.previous.clip != "Walk" {
 		t.Fatalf("interrupting early in a fade should fade from Walk, got %q", p.previous.clip)
+	}
+}
+
+func TestManualTimeHoldsPoseButCompletesBlend(t *testing.T) {
+	app, e, _ := newAnimApp(t, func(p *AnimationPlayer) { p.Play("Walk") })
+	p := player(app, e)
+	p.PlayOnce("Jump").FadeIn(.2)
+	p.ManualTime = true
+	p.Seek(.12)
+	run(app, .3)
+	if !near(p.Time(), .12) || p.fadeLength != 0 {
+		t.Fatalf("manual time=%v fade=%v", p.Time(), p.fadeLength)
+	}
+	p.Paused = true
+	p.Play("Walk").FadeIn(.2)
+	run(app, .1)
+	if p.fade != 0 {
+		t.Fatal("paused manual blend advanced")
+	}
+	p.Paused, p.ManualTime = false, false
+	run(app, .1)
+	if !near(p.Time(), .1) {
+		t.Fatal("normal playback did not resume")
 	}
 }

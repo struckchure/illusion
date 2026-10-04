@@ -22,6 +22,9 @@ printf 'module github.com/gen2brain/raylib-go/raylib\n\ngo 1.25\n' >"$work/rayli
 	echo "go $(go env GOVERSION | sed 's/^go//')"
 	echo
 	echo "use \"$mod\"" # quoted: paths may contain spaces
+	if [ "$mod" != "$illusion" ]; then
+		echo "use \"$illusion\""
+	fi
 	echo
 	echo "replace github.com/gen2brain/raylib-go/raylib => \"$work/raylib\""
 } >"$work/browser.work"
@@ -83,7 +86,7 @@ build_raylib() {
 		IsKeyDown IsKeyPressed IsKeyReleased GetKeyPressed GetCharPressed \
 		IsMouseButtonDown IsMouseButtonPressed IsMouseButtonReleased GetMouseWheelMove \
 		DrawGrid DrawFPS MeasureText GetPixelDataSize rlGetTextureIdDefault \
-		rlGetLocationUniform InitAudioDevice CloseAudioDevice IsAudioDeviceReady \
+		rlGetLocationUniform rlSetCullFace InitAudioDevice CloseAudioDevice IsAudioDeviceReady \
 		SetMasterVolume; do
 		exports=$exports,_$f
 	done

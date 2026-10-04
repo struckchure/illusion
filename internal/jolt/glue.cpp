@@ -15,6 +15,8 @@
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
@@ -566,6 +568,51 @@ int ILL_World_CastRay(ILL_World* w, const float origin[3], const float dir[3], I
 	putR(point, out->point);
 	put(normal, out->normal);
 	return 1;
+}
+
+// Clearance queries ignore trigger volumes as well as the requesting character.
+class CapsuleBodyFilter : public IgnoreSingleBodyFilter {
+public:
+ using IgnoreSingleBodyFilter::IgnoreSingleBodyFilter;
+ bool ShouldCollideLocked(const Body& body) const override { return !body.IsSensor(); }
+};
+
+int ILL_World_OverlapCapsule(ILL_World* w, const float center[3], float radius, float height, ILL_BodyID ignore) {
+ CapsuleShape shape(std::max(0.001f, height / 2 - radius), radius);
+ CapsuleBodyFilter filter{BodyID(ignore)};
+ AllHitCollisionCollector<CollideShapeCollector> hits;
+ w->system.GetNarrowPhaseQuery().CollideShape(&shape, Vec3::sReplicate(1), RMat44::sTranslation(rvec3(center)), {}, RVec3::sZero(), hits, {}, {}, filter);
+ for (const auto& h : hits.mHits) if (h.mPenetrationDepth > 0.005f) return 1;
+ return 0;
+}
+
+int ILL_World_SweepCapsule(ILL_World* w, const float center[3], const float delta[3], float radius, float height, ILL_BodyID ignore, ILL_RayHit* out) {
+ CapsuleShape shape(std::max(0.001f, height / 2 - radius), radius);
+ CapsuleBodyFilter filter{BodyID(ignore)};
+ AllHitCollisionCollector<CastShapeCollector> hits;
+ RShapeCast cast(&shape, Vec3::sReplicate(1), RMat44::sTranslation(rvec3(center)), vec3(delta));
+ w->system.GetNarrowPhaseQuery().CastShape(cast, {}, RVec3::sZero(), hits, {}, {}, filter);
+ const ShapeCastResult* best = nullptr;
+ for (const auto& h : hits.mHits) {
+  Vec3 normal = -h.mPenetrationAxis.NormalizedOr(Vec3::sAxisY());
+  // Ignore touching support surfaces when moving parallel to or away from them.
+  if (h.mPenetrationDepth <= 0.005f && normal.Dot(vec3(delta)) >= -0.0001f) continue;
+  if (!best || h.mFraction < best->mFraction) best = &h;
+ }
+ if (!best) return 0;
+ out->body = best->mBodyID2.GetIndexAndSequenceNumber();
+ out->fraction = best->mFraction;
+ put(best->mContactPointOn2, out->point);
+ put(-best->mPenetrationAxis.NormalizedOr(Vec3::sAxisY()), out->normal);
+ return 1;
+}
+
+void ILL_Character_UpdateControlled(ILL_Character* c, float dt) {
+ CharacterVirtual::ExtendedUpdateSettings settings;
+ settings.mWalkStairsStepUp = Vec3::sZero();
+ settings.mStickToFloorStepDown = Vec3::sZero();
+ PhysicsSystem& sys = c->world->system;
+ c->ch->ExtendedUpdate(dt, Vec3::sZero(), settings, sys.GetDefaultBroadPhaseLayerFilter(kMoving), sys.GetDefaultLayerFilter(kMoving), {}, {}, c->world->temp);
 }
 
 ILL_Character* ILL_Character_New(ILL_World* w, ILL_Shape* shape, const float position[3], float maxSlope, float supportRadius) {

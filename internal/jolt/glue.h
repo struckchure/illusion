@@ -102,6 +102,10 @@ typedef struct ILL_RayHit {
 // ignoring the body `ignore` (pass ILL_INVALID_BODY to ignore nothing).
 int ILL_World_CastRay(ILL_World* w, const float origin[3], const float dir[3], ILL_BodyID ignore, ILL_RayHit* out);
 
+int ILL_World_OverlapCapsule(ILL_World* w, const float center[3], float radius, float height, ILL_BodyID ignore);
+int ILL_World_SweepCapsule(ILL_World* w, const float center[3], const float delta[3], float radius, float height, ILL_BodyID ignore, ILL_RayHit* out);
+void ILL_Character_UpdateControlled(ILL_Character* c, float dt);
+
 ILL_Character* ILL_Character_New(ILL_World* w, ILL_Shape* shape, const float position[3], float maxSlope, float supportRadius);
 void ILL_Character_Delete(ILL_Character* c);
 void ILL_Character_Update(ILL_Character* c, float dt, float stepUp);
