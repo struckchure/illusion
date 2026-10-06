@@ -3,6 +3,8 @@ package audio
 import (
 	"math"
 	"testing"
+
+	"github.com/struckchure/illusion/asset"
 )
 
 func TestTone(t *testing.T) {
@@ -19,5 +21,16 @@ func TestTone(t *testing.T) {
 	}
 	if peak < 0.3 || peak > 0.5 {
 		t.Fatalf("peak %v", peak)
+	}
+}
+
+func TestMusicSettersIgnoreMissingTracks(t *testing.T) {
+	a := &Audio{state: &state{music: map[asset.Handle[Music]]struct{}{}}, tracks: asset.New[Music](nil)}
+	var h asset.Handle[Music]
+	a.SetMusicVolume(h, .5)
+	a.SetMusicPitch(h, 2)
+	a.SetMusicPan(h, -1)
+	if a.MusicPlaying(h) {
+		t.Fatal("a track that was never played is playing")
 	}
 }
