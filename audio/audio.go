@@ -251,6 +251,21 @@ func (a *Audio) SetMusicVolume(h asset.Handle[Music], volume float32) {
 	}
 }
 
+// SetMusicPitch sets a track's speed and pitch; 1 plays it as is. A looping
+// engine or machine can follow its speed with it.
+func (a *Audio) SetMusicPitch(h asset.Handle[Music], pitch float32) {
+	if m := a.tracks.Get(h); m != nil {
+		rl.SetMusicPitch(m.Music, orOne(pitch))
+	}
+}
+
+// SetMusicPan places a track from -1 (left) to 1 (right).
+func (a *Audio) SetMusicPan(h asset.Handle[Music], pan float32) {
+	if m := a.tracks.Get(h); m != nil {
+		rl.SetMusicPan(m.Music, max(-1, min(1, pan)))
+	}
+}
+
 // MusicPlaying reports whether a track is playing.
 func (a *Audio) MusicPlaying(h asset.Handle[Music]) bool {
 	_, ok := a.state.music[h]
