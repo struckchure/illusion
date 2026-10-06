@@ -276,6 +276,22 @@ API void w_UnloadShader(unsigned int id) {
 API void w_SetShaderValue(unsigned int id, int loc, const void *value, int type) {
 	SetShaderValue((Shader){id, NULL}, loc, value, type);
 }
+API void w_SetShaderValueV(unsigned int id, int loc, const void *value, int type, int count) {
+	SetShaderValueV((Shader){id, NULL}, loc, value, type, count);
+}
+API void w_SetShaderValueMatrix(unsigned int id, int loc, const Matrix *m) {
+	SetShaderValueMatrix((Shader){id, NULL}, loc, *m);
+}
+
+// Render targets and the matrices drawn with (for shadow maps).
+
+API void w_BeginTextureMode(const RenderTexture2D *t) { BeginTextureMode(*t); }
+API void w_GetMatrixModelview(Matrix *out) { *out = rlGetMatrixModelview(); }
+API void w_GetMatrixProjection(Matrix *out) { *out = rlGetMatrixProjection(); }
+API int w_FramebufferComplete(unsigned int id) { return rlFramebufferComplete(id); }
+API unsigned int w_LoadTextureDepth(int width, int height, int useRenderBuffer) {
+	return rlLoadTextureDepth(width, height, useRenderBuffer);
+}
 
 // Models stay in raylib's heap; Go mirrors their meshes (registered like the
 // generated ones), materials and mesh-material table (see models.go).

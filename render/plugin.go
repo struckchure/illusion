@@ -15,6 +15,8 @@ import (
 const (
 	// Begin starts the frame and clears the background.
 	Begin illusion.SystemSet = "render.Begin"
+	// Shadow draws the directional light's shadow map (see [Shadows]).
+	Shadow illusion.SystemSet = "render.Shadow"
 	// Begin3D enters 3D mode with the active camera.
 	Begin3D illusion.SystemSet = "render.Begin3D"
 	// Draw3D draws meshes. Add immediate-mode 3D drawing here (rl.DrawGrid,
@@ -50,12 +52,14 @@ func (Plugin) Build(app *illusion.App) {
 		illusion.R(&ClearColor{Color: color.RGBA{R: 24, G: 24, B: 28, A: 255}}),
 		illusion.R(&AmbientLight{Color: rl.White, Brightness: 0.25}),
 		illusion.R(&Shader{}),
+		illusion.R(&Shadows{}),
 	)
 	app.InsertResource(illusion.R(&renderer{}), illusion.R(&View3D{}))
 
 	app.AddSystems(illusion.PreStartup, illusion.Fn3(initRenderer).Named("render.init"))
 	app.ConfigureSets(illusion.Render,
-		Begin3D.After(Begin),
+		Shadow.After(Begin),
+		Begin3D.After(Shadow),
 		Draw3D.After(Begin3D).RunIf(illusion.Cond1(cameraActive)),
 		End3D.After(Draw3D),
 		Begin2D.After(End3D),
@@ -66,7 +70,8 @@ func (Plugin) Build(app *illusion.App) {
 	)
 	app.AddSystems(illusion.Render,
 		illusion.Fn1(beginFrame).InSet(Begin).Named("render.beginFrame"),
-		illusion.Fn5(beginCamera).InSet(Begin3D).Named("render.beginCamera"),
+		illusion.Fn6(drawShadows).InSet(Shadow).Named("render.drawShadows"),
+		illusion.Fn6(beginCamera).InSet(Begin3D).Named("render.beginCamera"),
 		illusion.Fn6(drawMeshes).InSet(Draw3D).Named("render.drawMeshes"),
 		illusion.Fn8(drawModels).InSet(Draw3D).Named("render.drawModels"),
 		illusion.Fn1(endCamera).InSet(End3D).Named("render.endCamera"),
@@ -79,6 +84,7 @@ func (Plugin) Build(app *illusion.App) {
 // Cleanup implements the optional plugin cleanup hook.
 func (Plugin) Cleanup(app *illusion.App) {
 	if r := ecs.GetResource[renderer](app.World); r != nil && r.ready {
+		r.freeShadow()
 		// UnloadMaterial unloads the textures in its maps; the diffuse map may
 		// still hold the last drawn material's texture, which belongs to (and
 		// has been unloaded with) the Texture store.
@@ -108,9 +114,20 @@ type renderer struct {
 	shader   *Shader
 	programs map[*Shader]*program
 	locUnlit int32
+	// locEmissive is where the shader takes the emissive colour, and
+	// emissive what it was last sent.
+	locEmissive int32
+	emissive    rl.Vector3
 
-	// This frame's light and camera, for the shaders that take them.
+	// This frame's light and camera, for the shaders that take them; frame
+	// counts frames, so each program is sent them once a frame.
 	lightDir, lightColor, ambient, viewPos rl.Vector3
+	frame                                  uint64
+
+	// The point lights: all of them this frame, and those that light it.
+	allLights, lights []pointLight
+
+	shadow shadowMap
 
 	posed map[*rl.Mesh]appliedPose // last pose applied to each model, by its meshes
 }
@@ -124,6 +141,7 @@ func initRenderer(res *illusion.Res[renderer], textures *illusion.Res[asset.Asse
 	r.material.Shader = p.shader
 	r.defaultTexture = r.material.GetMap(rl.MapDiffuse).Texture
 	r.locUnlit = p.loc("unlit")
+	r.locEmissive = p.loc("emissive")
 	r.ready = true
 }
 
@@ -131,6 +149,7 @@ func initRenderer(res *illusion.Res[renderer], textures *illusion.Res[asset.Asse
 type program struct {
 	shader rl.Shader
 	locs   map[string]int32
+	frame  uint64 // the frame it was last sent the light and camera
 }
 
 func (p *program) loc(name string) int32 {
@@ -168,14 +187,19 @@ func (r *renderer) program(s *Shader) *program {
 // uniformTypes are the types of a Shader's uniforms, by their length.
 var uniformTypes = [...]rl.ShaderUniformDataType{1: rl.ShaderUniformFloat, rl.ShaderUniformVec2, rl.ShaderUniformVec3, rl.ShaderUniformVec4}
 
-// use sends s this frame's light and camera and its own uniforms, and
-// returns it compiled.
+// use sends s this frame's lights, shadows and camera (the first time it's
+// used in the frame) and its own uniforms, and returns it compiled.
 func (r *renderer) use(s *Shader) rl.Shader {
 	p := r.program(s)
-	setVec3(p.shader, p.loc("lightDir"), r.lightDir)
-	setVec3(p.shader, p.loc("lightColor"), r.lightColor)
-	setVec3(p.shader, p.loc("ambient"), r.ambient)
-	setVec3(p.shader, p.loc("viewPos"), r.viewPos)
+	if p.frame != r.frame {
+		p.frame = r.frame
+		setVec3(p.shader, p.loc("lightDir"), r.lightDir)
+		setVec3(p.shader, p.loc("lightColor"), r.lightColor)
+		setVec3(p.shader, p.loc("ambient"), r.ambient)
+		setVec3(p.shader, p.loc("viewPos"), r.viewPos)
+		r.sendLights(p)
+		r.sendShadow(p)
+	}
 	for name, v := range s.Uniforms {
 		if loc := p.loc(name); loc >= 0 && len(v) >= 1 && len(v) <= 4 {
 			rl.SetShaderValue(p.shader, loc, v, uniformTypes[len(v)])
@@ -206,17 +230,8 @@ func (v *View3D) ScreenToWorldRay(p rl.Vector2) rl.Ray { return rl.GetScreenToWo
 // WorldToScreen converts a world position to a screen position.
 func (v *View3D) WorldToScreen(p rl.Vector3) rl.Vector2 { return rl.GetWorldToScreen(p, v.Camera) }
 
-func beginCamera(
-	res *illusion.Res[renderer],
-	cameras *illusion.Query2[Camera3d, transform.GlobalTransform],
-	lights *illusion.Query2[DirectionalLight, transform.GlobalTransform],
-	ambient *illusion.Res[AmbientLight],
-	view *illusion.Res[View3D],
-) {
-	r := res.Get()
-	r.in3D = false
-	view.Get().Active = false
-
+// activeCamera is the camera with the highest Order.
+func activeCamera(cameras *illusion.Query2[Camera3d, transform.GlobalTransform]) (*Camera3d, *transform.GlobalTransform, bool) {
 	var cam *Camera3d
 	var camTransform *transform.GlobalTransform
 	cameras.Each(func(_ ecs.Entity, c *Camera3d, g *transform.GlobalTransform) {
@@ -224,7 +239,23 @@ func beginCamera(
 			cam, camTransform = c, g
 		}
 	})
-	if cam == nil || !r.ready {
+	return cam, camTransform, cam != nil
+}
+
+func beginCamera(
+	res *illusion.Res[renderer],
+	cameras *illusion.Query2[Camera3d, transform.GlobalTransform],
+	lights *illusion.Query2[DirectionalLight, transform.GlobalTransform],
+	points *illusion.Query2[PointLight, transform.GlobalTransform],
+	ambient *illusion.Res[AmbientLight],
+	view *illusion.Res[View3D],
+) {
+	r := res.Get()
+	r.in3D = false
+	view.Get().Active = false
+
+	cam, camTransform, ok := activeCamera(cameras)
+	if !ok || !r.ready {
 		return
 	}
 
@@ -232,11 +263,17 @@ func beginCamera(
 	lightColor := rl.Vector3{}
 	if _, light, g, ok := firstLight(lights); ok {
 		lightDir = g.Forward()
-		lightColor = rgb(light.Color, 1)
+		brightness := light.Brightness
+		if brightness == 0 {
+			brightness = 1
+		}
+		lightColor = rgb(light.Color, brightness)
 	}
 	a := ambient.Get()
 	position := camTransform.Translation()
+	r.frame++
 	r.lightDir, r.lightColor, r.ambient, r.viewPos = lightDir, lightColor, rgb(a.Color, a.Brightness), position
+	r.gatherLights(position, points)
 	r.use(r.shader)
 
 	fovy := cam.Fovy
@@ -274,7 +311,7 @@ func drawMeshes(
 	res *illusion.Res[renderer],
 	meshes *illusion.Res[asset.Assets[Mesh]],
 	materials *illusion.Res[asset.Assets[StandardMaterial]],
-	q *illusion.Query2Where[Mesh3d, transform.GlobalTransform, illusion.Without[Hidden]],
+	q *illusion.Query2Where[Mesh3d, transform.GlobalTransform, illusion.And[illusion.Without[Hidden], illusion.Without[ShadowOnly]]],
 	withMaterial *illusion.Query1[MeshMaterial3d],
 	withPasses *illusion.Query1[Passes],
 ) {
@@ -319,7 +356,7 @@ func drawModels(
 	res *illusion.Res[renderer],
 	models *illusion.Res[asset.Assets[Model]],
 	materials *illusion.Res[asset.Assets[StandardMaterial]],
-	q *illusion.Query2Where[Model3d, transform.GlobalTransform, illusion.Without[Hidden]],
+	q *illusion.Query2Where[Model3d, transform.GlobalTransform, illusion.And[illusion.Without[Hidden], illusion.Without[ShadowOnly]]],
 	withMaterial *illusion.Query1[MeshMaterial3d],
 	players *illusion.Query1[AnimationPlayer],
 	animations *illusion.Res[asset.Assets[Animations]],
@@ -362,6 +399,7 @@ func drawModels(
 
 		// draw draws the meshes that aren't hidden or skipped, with shader.
 		draw := func(shader rl.Shader, skip map[int]bool) {
+			main := shader.ID == r.material.Shader.ID
 			if override != nil {
 				r.apply(override)
 			} else {
@@ -379,6 +417,9 @@ func drawModels(
 					continue
 				}
 				mat := own[meshMaterial[i]]
+				if main {
+					r.setEmissive(emission(mat))
+				}
 				mat.Shader = shader // light the model's own materials
 				if t := textureStore.Get(swap); t != nil {
 					// The maps are shared by every entity drawing this model, so
@@ -469,6 +510,30 @@ func (r *renderer) apply(mat *StandardMaterial) {
 		diffuse.Texture = tex.Texture2D
 	}
 	r.setUnlit(mat.Unlit)
+	r.setEmissive(rgb(mat.Emissive, 1))
+}
+
+// emission is the light a model's own material gives off: its emission
+// map's colour, which raylib's glTF loader sets when the material has an
+// emissive texture.
+func emission(mat rl.Material) rl.Vector3 {
+	if mat.Maps == nil {
+		return rl.Vector3{}
+	}
+	m := mat.GetMap(rl.MapEmission)
+	if m.Texture.ID == 0 {
+		return rl.Vector3{}
+	}
+	return rgb(m.Color, 1)
+}
+
+// setEmissive sends the shader the emissive colour of what's drawn next.
+func (r *renderer) setEmissive(e rl.Vector3) {
+	if e == r.emissive || r.locEmissive < 0 {
+		return
+	}
+	r.emissive = e
+	setVec3(r.material.Shader, r.locEmissive, e)
 }
 
 func (r *renderer) setUnlit(unlit bool) {
