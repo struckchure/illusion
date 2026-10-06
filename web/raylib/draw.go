@@ -131,6 +131,11 @@ func GetMatrixProjection() Matrix {
 	return result[Matrix]()
 }
 
+// Scissor mode: drawing is cut to a rectangle of the screen.
+
+func BeginScissorMode(x, y, width, height int32) { call("BeginScissorMode", x, y, width, height) }
+func EndScissorMode()                            { call("EndScissorMode") }
+
 // SetCullFace sets which faces are culled: 0 for front faces, 1 for back.
 func SetCullFace(mode int32) { call("rlSetCullFace", mode) }
 
