@@ -184,7 +184,7 @@ systems that connect it to the ECS, and otherwise gets out of the way.
 | `render` | 3D: `Camera3d`, `Mesh3d`, `Model3d`, `StandardMaterial`, `DirectionalLight`, skeletal animation with `Animations` and `AnimationPlayer` (play, play once, crossfade, `AnimationFinished`), `BoneAttachment` to put entities on bones, `ModelParts` to hide or retexture single meshes of a model per entity (for clothes over a body, say), and `Cloth` to let parts of a skinned model swing and hang with physics, resisting folding and at rest keeping the drape they're modelled with, kept out of capsule colliders on its bones (hair, skirts). 2D: `Camera2d`, `Sprite`, `SpriteAnimation`, `Text2d`. Draw sets for immediate-mode raylib calls |
 | `audio` | `Sound` and `Music` assets, the `Audio` parameter, and tone synthesis |
 | `diag` | `Gizmos` (debug lines, boxes, spheres, capsules…) and a stats overlay (F3) |
-| `physics` | Jolt rigid bodies, colliders, sensors, character controllers, raycasts, collision events; `DebugPlugin` draws colliders (F4) |
+| `physics` | Jolt rigid bodies, colliders (with `WithCenterOfMass` to weight them), sensors, character controllers, raycasts, collision events; `Vehicle` puts a dynamic body on wheels (Jolt's wheeled vehicles and motorcycles: sprung suspension, tyre grip, an engine, an automatic gearbox, differentials and anti-roll bars), driven by `VehicleInput`, with its wheels' poses in `VehicleState`; `Interpolated` keeps a body's last two simulated poses, to draw it smoothly between fixed steps; `DebugPlugin` draws colliders (F4) |
 | `defaults` | `Plugins`, the bundle of the plugins above except physics |
 
 ## Examples
@@ -203,6 +203,7 @@ go run ./examples/cube
 | `sprites` | 2D: sprites, a generated sprite-sheet animation, a 2D camera, text, gizmos, sound |
 | `physics` | A platformer playground built from the models in `examples/assets` |
 | `anim` | Skeletal animation: tentacles sharing one model, each with its own `AnimationPlayer`; crossfades, one-shot clips, and orbs riding the tips on `BoneAttachment`s |
+| `vehicle` | A car to drive round a test track: `physics.Vehicle`, its body drawn from `physics.Interpolated` and its wheels from `physics.VehicleState`, and a chase camera |
 
 ### In the browser (experimental)
 
@@ -239,7 +240,8 @@ Run the tests with `go test ./...`; they don't need a window. After changing
 
 - One active 3D camera and one directional light; no shadows yet.
 - Physics bodies should be root entities, and colliders ignore
-  `Transform.Scale`. Rendering isn't interpolated between fixed steps.
+  `Transform.Scale`. Rendering isn't interpolated between fixed steps,
+  except for what a game draws from `physics.Interpolated`.
 - Systems run on one thread (raylib must stay on the main thread).
 - Handles are reference-counted by hand: `Loader.Release` drops a reference.
 

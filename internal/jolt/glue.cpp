@@ -24,10 +24,15 @@
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Vehicle/MotorcycleController.h>
+#include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
+#include <Jolt/Physics/Vehicle/VehicleConstraint.h>
+#include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
 #include <Jolt/RegisterTypes.h>
 
 #include <algorithm>
@@ -326,6 +331,16 @@ ILL_Shape* keep(const ShapeSettings::ShapeResult& r) {
 
 const Shape* shapeOf(ILL_Shape* s) { return reinterpret_cast<const Shape*>(s); }
 
+// scaled is a friction curve with its friction (Y) values scaled by k.
+LinearCurve scaled(const LinearCurve& c, float k) {
+	LinearCurve out;
+	out.Reserve(uint(c.mPoints.size()));
+	for (const LinearCurve::Point& p : c.mPoints) {
+		out.AddPoint(p.mX, p.mY * k);
+	}
+	return out;
+}
+
 // Jolt requires the convex radius to fit inside the shape.
 float convexRadius(float smallest) { return std::min(cDefaultConvexRadius, smallest * 0.5f); }
 
@@ -348,6 +363,23 @@ struct ILL_World {
 	// Declared after everything it refers to, so it is destroyed first.
 	PhysicsSystem system;
 	CharacterContacts characterContacts{system, contacts};
+
+	struct Vehicle {
+		Ref<VehicleConstraint> constraint;
+		std::vector<Vec3> right, up; // per wheel, for read-back
+	};
+	std::unordered_map<uint32_t, Vehicle> vehicles; // by body
+
+	// removeVehicle takes a body's vehicle out of the simulation and frees it.
+	void removeVehicle(uint32_t body) {
+		auto it = vehicles.find(body);
+		if (it == vehicles.end()) {
+			return;
+		}
+		system.RemoveStepListener(it->second.constraint);
+		system.RemoveConstraint(it->second.constraint);
+		vehicles.erase(it);
+	}
 };
 
 struct ILL_Character {
@@ -360,6 +392,10 @@ struct ILL_Character {
 static_assert(sizeof(ILL_BodySettings) == 112 && offsetof(ILL_BodySettings, userData) == 104, "jolt_js.go cBodySettings");
 static_assert(sizeof(ILL_ContactEvent) == 36, "jolt_js.go cContactEvent");
 static_assert(sizeof(ILL_RayHit) == 32, "jolt_js.go cRayHit");
+static_assert(sizeof(ILL_WheelDesc) == 144, "jolt_js.go cWheelDesc");
+static_assert(sizeof(ILL_VehicleDesc) == 128, "jolt_js.go cVehicleDesc");
+static_assert(sizeof(ILL_Differential) == 24, "jolt_js.go cDifferential");
+static_assert(sizeof(ILL_AntiRollBar) == 12, "jolt_js.go cAntiRollBar");
 #endif
 
 extern "C" {
@@ -382,7 +418,12 @@ ILL_World* ILL_World_New(uint32_t maxBodies) {
 	return w;
 }
 
-void ILL_World_Delete(ILL_World* w) { delete w; }
+void ILL_World_Delete(ILL_World* w) {
+	while (!w->vehicles.empty()) {
+		w->removeVehicle(w->vehicles.begin()->first);
+	}
+	delete w;
+}
 
 int ILL_World_Step(ILL_World* w, float dt, int collisionSteps) {
 	int err = int(w->system.Update(dt, collisionSteps, &w->temp, &w->jobs));
@@ -490,6 +531,7 @@ ILL_BodyID ILL_Body_Create(ILL_World* w, const ILL_BodySettings* s) {
 void ILL_Body_Destroy(ILL_World* w, ILL_BodyID raw) {
 	BodyInterface& bi = w->system.GetBodyInterface();
 	BodyID id(raw);
+	w->removeVehicle(raw);
 	w->contacts.EndAll(raw);
 	if (bi.IsAdded(id)) {
 		bi.RemoveBody(id);
@@ -653,5 +695,249 @@ void ILL_Character_GetGroundVelocity(ILL_Character* c, float out[3]) { put(c->ch
 void ILL_Character_GetGroundNormal(ILL_Character* c, float out[3]) { put(c->ch->GetGroundNormal(), out); }
 int ILL_Character_IsSupported(ILL_Character* c) { return c->ch->IsSupported(); }
 ILL_BodyID ILL_Character_InnerBody(ILL_Character* c) { return c->ch->GetInnerBodyID().GetIndexAndSequenceNumber(); }
+
+ILL_Shape* ILL_Shape_OffsetCenterOfMass(ILL_Shape* inner, const float offset[3]) {
+	return keep(OffsetCenterOfMassShapeSettings(vec3(offset), shapeOf(inner)).Create());
+}
+
+void ILL_Shape_GetCenterOfMass(ILL_Shape* s, float out[3]) { put(shapeOf(s)->GetCenterOfMass(), out); }
+
+void ILL_WheelDesc_Default(ILL_WheelDesc* out) {
+	WheelSettingsWV d;
+	*out = ILL_WheelDesc{};
+	put(d.mPosition, out->position);
+	put(d.mSuspensionDirection, out->suspensionDir);
+	put(d.mSteeringAxis, out->steeringAxis);
+	put(d.mWheelUp, out->wheelUp);
+	put(d.mWheelForward, out->wheelForward);
+	// A model built in the body's frame: right is forward × up.
+	put(d.mWheelForward.Cross(d.mWheelUp), out->modelRight);
+	put(d.mWheelUp, out->modelUp);
+	out->radius = d.mRadius;
+	out->width = d.mWidth;
+	out->suspensionMin = d.mSuspensionMinLength;
+	out->suspensionMax = d.mSuspensionMaxLength;
+	out->preload = d.mSuspensionPreloadLength;
+	out->frequency = d.mSuspensionSpring.mFrequency;
+	out->damping = d.mSuspensionSpring.mDamping;
+	out->maxSteer = d.mMaxSteerAngle;
+	out->maxBrakeTorque = d.mMaxBrakeTorque;
+	out->maxHandBrakeTorque = d.mMaxHandBrakeTorque;
+	out->inertia = d.mInertia;
+	out->angularDamping = d.mAngularDamping;
+	out->longitudinalGrip = 1;
+	out->lateralGrip = 1;
+}
+
+void ILL_VehicleDesc_Default(ILL_VehicleDesc* out) {
+	VehicleConstraintSettings c;
+	MotorcycleControllerSettings m; // a WheeledVehicleControllerSettings, plus lean
+	*out = ILL_VehicleDesc{};
+	put(c.mUp, out->up);
+	put(c.mForward, out->forward);
+	out->maxPitchRoll = c.mMaxPitchRollAngle;
+	out->controller = ILL_WHEELED;
+	out->tester = ILL_TEST_CYLINDER;
+	out->maxTorque = m.mEngine.mMaxTorque;
+	out->minRPM = m.mEngine.mMinRPM;
+	out->maxRPM = m.mEngine.mMaxRPM;
+	out->engineInertia = m.mEngine.mInertia;
+	out->engineDamping = m.mEngine.mAngularDamping;
+	out->numGears = int32_t(std::min<size_t>(8, m.mTransmission.mGearRatios.size()));
+	for (int i = 0; i < out->numGears; i++) {
+		out->gears[i] = m.mTransmission.mGearRatios[i];
+	}
+	out->reverseGear = m.mTransmission.mReverseGearRatios.empty() ? -2.9f : m.mTransmission.mReverseGearRatios[0];
+	out->shiftUpRPM = m.mTransmission.mShiftUpRPM;
+	out->shiftDownRPM = m.mTransmission.mShiftDownRPM;
+	out->clutchStrength = m.mTransmission.mClutchStrength;
+	out->switchTime = m.mTransmission.mSwitchTime;
+	out->limitedSlipRatio = m.mDifferentialLimitedSlipRatio;
+	out->maxLean = m.mMaxLeanAngle;
+	out->leanSpring = m.mLeanSpringConstant;
+	out->leanDamping = m.mLeanSpringDamping;
+}
+
+void ILL_Differential_Default(ILL_Differential* out) {
+	VehicleDifferentialSettings d;
+	out->left = d.mLeftWheel;
+	out->right = d.mRightWheel;
+	out->ratio = d.mDifferentialRatio;
+	out->split = d.mLeftRightSplit;
+	out->torqueRatio = d.mEngineTorqueRatio;
+	out->limitedSlip = d.mLimitedSlipRatio;
+}
+
+int ILL_Vehicle_Create(ILL_World* w, ILL_BodyID raw, const ILL_VehicleDesc* d, const ILL_WheelDesc* wheels,
+	int numWheels, const ILL_Differential* diffs, int numDiffs, const ILL_AntiRollBar* bars, int numBars) {
+	if (w->vehicles.count(raw) || numWheels <= 0) {
+		return 0;
+	}
+
+	VehicleConstraintSettings vs;
+	vs.mUp = vec3(d->up).NormalizedOr(Vec3::sAxisY());
+	vs.mForward = vec3(d->forward).NormalizedOr(Vec3::sAxisZ());
+	vs.mMaxPitchRollAngle = d->maxPitchRoll;
+
+	ILL_World::Vehicle v;
+	for (int i = 0; i < numWheels; i++) {
+		const ILL_WheelDesc& s = wheels[i];
+		WheelSettingsWV* ws = new WheelSettingsWV;
+		ws->mPosition = vec3(s.position);
+		ws->mSuspensionDirection = vec3(s.suspensionDir).NormalizedOr(-vs.mUp);
+		ws->mSteeringAxis = vec3(s.steeringAxis).NormalizedOr(vs.mUp);
+		ws->mWheelUp = vec3(s.wheelUp).NormalizedOr(vs.mUp);
+		ws->mWheelForward = vec3(s.wheelForward).NormalizedOr(vs.mForward);
+		ws->mRadius = s.radius;
+		ws->mWidth = s.width;
+		ws->mSuspensionMinLength = s.suspensionMin;
+		ws->mSuspensionMaxLength = std::max(s.suspensionMin, s.suspensionMax);
+		ws->mSuspensionPreloadLength = s.preload;
+		ws->mSuspensionSpring = SpringSettings(
+			s.stiffness ? ESpringMode::StiffnessAndDamping : ESpringMode::FrequencyAndDamping, s.frequency, s.damping);
+		ws->mMaxSteerAngle = s.maxSteer;
+		ws->mMaxBrakeTorque = s.maxBrakeTorque;
+		ws->mMaxHandBrakeTorque = s.maxHandBrakeTorque;
+		ws->mInertia = s.inertia;
+		ws->mAngularDamping = s.angularDamping;
+		ws->mLongitudinalFriction = scaled(ws->mLongitudinalFriction, s.longitudinalGrip);
+		ws->mLateralFriction = scaled(ws->mLateralFriction, s.lateralGrip);
+		vs.mWheels.push_back(ws);
+		v.right.push_back(vec3(s.modelRight).NormalizedOr(-Vec3::sAxisX()));
+		v.up.push_back(vec3(s.modelUp).NormalizedOr(Vec3::sAxisY()));
+	}
+
+	WheeledVehicleControllerSettings* cs;
+	if (d->controller == ILL_MOTORCYCLE) {
+		MotorcycleControllerSettings* m = new MotorcycleControllerSettings;
+		m->mMaxLeanAngle = d->maxLean;
+		m->mLeanSpringConstant = d->leanSpring;
+		m->mLeanSpringDamping = d->leanDamping;
+		cs = m;
+	} else {
+		cs = new WheeledVehicleControllerSettings;
+	}
+	cs->mEngine.mMaxTorque = d->maxTorque;
+	cs->mEngine.mMinRPM = d->minRPM;
+	cs->mEngine.mMaxRPM = d->maxRPM;
+	cs->mEngine.mInertia = d->engineInertia;
+	cs->mEngine.mAngularDamping = d->engineDamping;
+	cs->mTransmission.mGearRatios.clear();
+	for (int i = 0; i < std::min(8, int(d->numGears)); i++) {
+		cs->mTransmission.mGearRatios.push_back(d->gears[i]);
+	}
+	if (cs->mTransmission.mGearRatios.empty()) {
+		cs->mTransmission.mGearRatios.push_back(1);
+	}
+	cs->mTransmission.mReverseGearRatios = {d->reverseGear < 0 ? d->reverseGear : -d->reverseGear};
+	cs->mTransmission.mShiftUpRPM = d->shiftUpRPM;
+	cs->mTransmission.mShiftDownRPM = d->shiftDownRPM;
+	cs->mTransmission.mClutchStrength = d->clutchStrength;
+	cs->mTransmission.mSwitchTime = d->switchTime;
+	cs->mDifferentialLimitedSlipRatio = d->limitedSlipRatio;
+	for (int i = 0; i < numDiffs; i++) {
+		VehicleDifferentialSettings ds;
+		ds.mLeftWheel = diffs[i].left < numWheels ? diffs[i].left : -1;
+		ds.mRightWheel = diffs[i].right < numWheels ? diffs[i].right : -1;
+		ds.mDifferentialRatio = diffs[i].ratio;
+		ds.mLeftRightSplit = diffs[i].split;
+		ds.mEngineTorqueRatio = diffs[i].torqueRatio;
+		ds.mLimitedSlipRatio = diffs[i].limitedSlip;
+		cs->mDifferentials.push_back(ds);
+	}
+	vs.mController = cs;
+	for (int i = 0; i < numBars; i++) {
+		if (bars[i].left < 0 || bars[i].left >= numWheels || bars[i].right < 0 || bars[i].right >= numWheels) {
+			continue;
+		}
+		VehicleAntiRollBar bar;
+		bar.mLeftWheel = bars[i].left;
+		bar.mRightWheel = bars[i].right;
+		bar.mStiffness = bars[i].stiffness;
+		vs.mAntiRollBars.push_back(bar);
+	}
+
+	BodyLockWrite lock(w->system.GetBodyLockInterface(), BodyID(raw));
+	if (!lock.Succeeded() || !lock.GetBody().IsDynamic()) {
+		return 0;
+	}
+	v.constraint = new VehicleConstraint(lock.GetBody(), vs);
+	switch (d->tester) {
+	case ILL_TEST_RAY:
+		v.constraint->SetVehicleCollisionTester(new VehicleCollisionTesterRay(kMoving, vs.mUp));
+		break;
+	case ILL_TEST_SPHERE: {
+		float r = FLT_MAX;
+		for (int i = 0; i < numWheels; i++) {
+			r = std::min(r, 0.5f * wheels[i].width);
+		}
+		v.constraint->SetVehicleCollisionTester(new VehicleCollisionTesterCastSphere(kMoving, r, vs.mUp));
+		break;
+	}
+	default:
+		v.constraint->SetVehicleCollisionTester(new VehicleCollisionTesterCastCylinder(kMoving));
+	}
+	lock.ReleaseLock();
+	w->system.AddConstraint(v.constraint);
+	w->system.AddStepListener(v.constraint);
+	w->vehicles.emplace(raw, std::move(v));
+	return 1;
+}
+
+void ILL_Vehicle_Destroy(ILL_World* w, ILL_BodyID body) { w->removeVehicle(body); }
+
+void ILL_Vehicle_SetInput(ILL_World* w, ILL_BodyID body, float forward, float right, float brake, float handBrake) {
+	auto it = w->vehicles.find(body);
+	if (it == w->vehicles.end()) {
+		return;
+	}
+	auto* c = static_cast<WheeledVehicleController*>(it->second.constraint->GetController());
+	c->SetDriverInput(forward, right, brake, handBrake);
+	if (forward != 0 || right != 0 || brake != 0 || handBrake != 0) {
+		w->system.GetBodyInterface().ActivateBody(BodyID(body));
+	}
+}
+
+int ILL_Vehicle_GetWheels(ILL_World* w, ILL_BodyID body, float* out, int cap) {
+	auto it = w->vehicles.find(body);
+	if (it == w->vehicles.end()) {
+		return 0;
+	}
+	const ILL_World::Vehicle& v = it->second;
+	const VehicleConstraint& c = *v.constraint;
+	int n = int(c.GetWheels().size());
+	for (int i = 0; i < std::min(n, cap); i++) {
+		const Wheel* wheel = c.GetWheel(i);
+		Mat44 m = c.GetWheelLocalTransform(i, v.right[i], v.up[i]);
+		float* o = out + ILL_WHEEL_STATE * i;
+		put(m.GetTranslation(), o);
+		putQ(m.GetQuaternion(), o + 3);
+		o[7] = wheel->GetAngularVelocity();
+		o[8] = wheel->GetSteerAngle();
+		o[9] = wheel->GetSuspensionLength();
+		o[10] = wheel->HasContact() ? 1.0f : 0.0f;
+	}
+	return n;
+}
+
+void ILL_Vehicle_GetStatus(ILL_World* w, ILL_BodyID body, float out[4]) {
+	out[0] = out[1] = out[2] = out[3] = 0;
+	auto it = w->vehicles.find(body);
+	if (it == w->vehicles.end()) {
+		return;
+	}
+	const VehicleConstraint& c = *it->second.constraint;
+	auto* ctrl = static_cast<const WheeledVehicleController*>(c.GetController());
+	out[0] = ctrl->GetEngine().GetCurrentRPM();
+	out[1] = float(ctrl->GetTransmission().GetCurrentGear());
+	BodyInterface& bi = w->system.GetBodyInterface();
+	Vec3 forward = bi.GetRotation(BodyID(body)) * c.GetLocalForward();
+	out[2] = bi.GetLinearVelocity(BodyID(body)).Dot(forward);
+	int touching = 0;
+	for (const Wheel* wheel : c.GetWheels()) {
+		touching += wheel->HasContact() ? 1 : 0;
+	}
+	out[3] = float(touching);
+}
 
 } // extern "C"

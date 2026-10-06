@@ -118,6 +118,102 @@ void ILL_Character_GetGroundNormal(ILL_Character* c, float out[3]);
 int ILL_Character_IsSupported(ILL_Character* c);
 ILL_BodyID ILL_Character_InnerBody(ILL_Character* c);
 
+// OffsetCenterOfMass returns a new shape: inner with its center of mass moved
+// by offset. It does not consume inner.
+ILL_Shape* ILL_Shape_OffsetCenterOfMass(ILL_Shape* inner, const float offset[3]);
+// Writes the shape's center of mass, in its own space.
+void ILL_Shape_GetCenterOfMass(ILL_Shape* s, float out[3]);
+
+// Vehicles: Jolt's VehicleConstraint on a dynamic body, with wheels that cast
+// against the world and are driven through an engine, a gearbox and
+// differentials. A body has at most one vehicle, addressed by the body's ID
+// and destroyed with it. Vectors are in the body's local space.
+enum { ILL_WHEELED = 0, ILL_MOTORCYCLE = 1 };
+enum { ILL_TEST_CYLINDER = 0, ILL_TEST_RAY = 1, ILL_TEST_SPHERE = 2 };
+
+typedef struct ILL_WheelDesc {
+	float position[3];      // where the suspension is attached
+	float suspensionDir[3]; // pointing down
+	float steeringAxis[3];  // pointing up
+	float wheelUp[3];       // up at neutral steering
+	float wheelForward[3];  // forward at neutral steering
+	float modelRight[3];    // the wheel model's axis that read-back turns to face right
+	float modelUp[3];       // the wheel model's axis that read-back turns to face up
+	float radius;
+	float width;
+	float suspensionMin;    // suspension length fully raised
+	float suspensionMax;    // suspension length fully drooped
+	float preload;
+	float frequency;        // suspension spring, Hz
+	float damping;          // suspension spring, 0..1
+	float maxSteer;         // radians; negative steers the other way
+	float maxBrakeTorque;
+	float maxHandBrakeTorque;
+	float inertia;
+	float angularDamping;
+	float longitudinalGrip; // scales the tire's forward friction curve
+	float lateralGrip;      // scales the tire's sideways friction curve
+	int32_t stiffness;      // 1: frequency is the spring's stiffness (N/m), damping its N·s/m
+} ILL_WheelDesc;
+
+typedef struct ILL_VehicleDesc {
+	float up[3];
+	float forward[3];
+	float maxPitchRoll; // radians; pi = no limit
+	int32_t controller; // ILL_WHEELED or ILL_MOTORCYCLE
+	int32_t tester;     // ILL_TEST_*
+	float maxTorque;    // engine, Nm
+	float minRPM;
+	float maxRPM;
+	float engineInertia;
+	float engineDamping;
+	float gears[8];     // forward gear ratios, first numGears used
+	int32_t numGears;
+	float reverseGear;  // negative
+	float shiftUpRPM;
+	float shiftDownRPM;
+	float clutchStrength;
+	float switchTime;
+	float limitedSlipRatio; // between differentials
+	float maxLean;          // motorcycle only, radians
+	float leanSpring;
+	float leanDamping;
+} ILL_VehicleDesc;
+
+typedef struct ILL_Differential {
+	int32_t left, right; // wheel indices, -1 for none
+	float ratio;
+	float split;         // 0 = all to the left wheel, 1 = all to the right
+	float torqueRatio;   // share of the engine's torque
+	float limitedSlip;
+} ILL_Differential;
+
+typedef struct ILL_AntiRollBar {
+	int32_t left, right;
+	float stiffness;
+} ILL_AntiRollBar;
+
+void ILL_WheelDesc_Default(ILL_WheelDesc* out);
+void ILL_VehicleDesc_Default(ILL_VehicleDesc* out);
+void ILL_Differential_Default(ILL_Differential* out);
+// Returns 0 if the body isn't a live dynamic body or already has a vehicle.
+int ILL_Vehicle_Create(ILL_World* w, ILL_BodyID body, const ILL_VehicleDesc* desc, const ILL_WheelDesc* wheels,
+	int numWheels, const ILL_Differential* diffs, int numDiffs, const ILL_AntiRollBar* bars, int numBars);
+void ILL_Vehicle_Destroy(ILL_World* w, ILL_BodyID body);
+// forward and right are -1..1, brake and handBrake 0..1. Any non-zero input
+// wakes the body.
+void ILL_Vehicle_SetInput(ILL_World* w, ILL_BodyID body, float forward, float right, float brake, float handBrake);
+// Writes ILL_WHEEL_STATE floats per wheel, for up to cap wheels, and returns
+// the vehicle's wheel count (0 without a vehicle): the wheel model's transform
+// in the body's space (position xyz, rotation xyzw, with spin, steer and
+// suspension), then its angular velocity (rad/s), steer angle, suspension
+// length and 1 if it touches something.
+#define ILL_WHEEL_STATE 11
+int ILL_Vehicle_GetWheels(ILL_World* w, ILL_BodyID body, float* out, int cap);
+// Writes the engine's rpm, the gear (-1 reverse, 0 neutral), the speed along
+// the vehicle's forward (m/s) and how many wheels touch something.
+void ILL_Vehicle_GetStatus(ILL_World* w, ILL_BodyID body, float out[4]);
+
 #ifdef __cplusplus
 }
 #endif

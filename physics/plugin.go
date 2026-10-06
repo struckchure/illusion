@@ -64,14 +64,17 @@ func (p Plugin) Build(app *illusion.App) {
 			illusion.Fn4(createBodies).Named("physics.createBodies"),
 			illusion.Fn2(rebuildCharacters).Named("physics.rebuildCharacters"),
 			illusion.Fn3(createCharacters).Named("physics.createCharacters"),
-			illusion.Fn4(pushChanges).Named("physics.pushChanges"),
+			illusion.Fn5(pushChanges).Named("physics.pushChanges"),
+			illusion.Fn2(pushVehicles).Named("physics.pushVehicles"),
 		).InSet(Prepare),
 		illusion.Chain(
 			illusion.Fn3(moveCharacters).Named("physics.moveCharacters"),
 			illusion.Fn3(step).Named("physics.step"),
 		).InSet(Step),
-		illusion.Group(
+		illusion.Chain(
 			illusion.Fn4(pullBodies).Named("physics.pullBodies"),
+			illusion.Fn2(pullInterpolated).Named("physics.pullInterpolated"),
+			illusion.Fn3(pullVehicles).Named("physics.pullVehicles"),
 			illusion.Fn2(pullCharacters).Named("physics.pullCharacters"),
 			illusion.Fn3(sendCollisions).Named("physics.sendCollisions"),
 		).InSet(Writeback),
@@ -106,6 +109,7 @@ type world struct {
 	carry   map[ecs.Entity]Velocity
 	gravity rl.Vector3
 	gravSet bool
+	wheels  []jolt.WheelState // scratch for pullVehicles
 }
 
 // body links an entity to its Jolt body.
@@ -116,6 +120,8 @@ type body struct {
 	// What the plugin last wrote (or read), to spot user changes.
 	lastTransform transform.Transform
 	lastVelocity  Velocity
+	// vehicle is set while the body carries a Vehicle's constraint.
+	vehicle bool
 }
 
 // bodyConfig is everything a body is built from, besides its pose and
@@ -130,6 +136,8 @@ type bodyConfig struct {
 	damping                     Damping
 	hasMaterial, hasMass        bool
 	hasGravityScale, hasDamping bool
+	vehicle                     vehicleKey
+	hasVehicle                  bool
 }
 
 // colliderKey identifies a Collider. Point and index slices are compared by
@@ -139,6 +147,8 @@ type colliderKey struct {
 	size      [3]float32
 	offset    rl.Vector3
 	hasOffset bool
+	com       rl.Vector3
+	hasCom    bool
 	points    *[3]float32
 	nPoints   int
 	indices   *uint32
@@ -147,6 +157,7 @@ type colliderKey struct {
 
 func keyOf(c *Collider) colliderKey {
 	k := colliderKey{kind: c.kind, size: c.size, offset: c.offset, hasOffset: c.hasOffset,
+		com: c.centerOfMass, hasCom: c.hasCenterOfMass,
 		nPoints: len(c.points), nIndices: len(c.indices)}
 	if len(c.points) > 0 {
 		k.points = &c.points[0]
@@ -218,6 +229,7 @@ type optional struct {
 	lock         *ecs.Map[LockRotation]
 	continuous   *ecs.Map[ContinuousCollision]
 	velocity     *ecs.Map[Velocity]
+	vehicle      *ecs.Map[Vehicle]
 }
 
 func (o *optional) InitParam(w *ecs.World) {
@@ -230,6 +242,7 @@ func (o *optional) InitParam(w *ecs.World) {
 	o.lock = ecs.NewMap[LockRotation](w)
 	o.continuous = ecs.NewMap[ContinuousCollision](w)
 	o.velocity = ecs.NewMap[Velocity](w)
+	o.vehicle = ecs.NewMap[Vehicle](w)
 }
 
 // config reads the settings e's body should be built from.
@@ -252,6 +265,9 @@ func (o *optional) config(e ecs.Entity, rb *RigidBody, col *Collider) bodyConfig
 	}
 	if d := o.damping.Get(e); d != nil {
 		c.damping, c.hasDamping = *d, true
+	}
+	if v := o.vehicle.Get(e); v != nil {
+		c.vehicle, c.hasVehicle = vehicleKeyOf(v), true
 	}
 	return c
 }
@@ -337,7 +353,11 @@ func createBodies(
 		id := w.jolt.CreateBody(s)
 		shape.Release()
 		w.entities[id] = e
-		cmd.Entity(e).Insert(illusion.C(body{id: id, config: cfg, lastTransform: *tr, lastVelocity: vel}))
+		b := body{id: id, config: cfg, lastTransform: *tr, lastVelocity: vel}
+		if v := opt.vehicle.Get(e); v != nil && s.Motion == jolt.Dynamic {
+			b.vehicle = createVehicle(w.jolt, id, v)
+		}
+		cmd.Entity(e).Insert(illusion.C(b))
 	}
 }
 
@@ -358,12 +378,19 @@ func buildShape(c *Collider) (*jolt.Shape, error) {
 	case shapeMesh:
 		s, err = jolt.NewMesh(c.points, c.indices)
 	}
-	if err != nil || !c.hasOffset {
-		return s, err
+	if err == nil && c.hasOffset {
+		moved, err2 := s.Offset(v3(c.offset))
+		s.Release()
+		s, err = moved, err2
 	}
-	moved, err := s.Offset(v3(c.offset))
-	s.Release()
-	return moved, err
+	if err == nil && c.hasCenterOfMass {
+		// Jolt moves the center of mass from the shape's own.
+		own := s.CenterOfMass()
+		weighted, err2 := s.OffsetCenterOfMass(v3(rl.Vector3Subtract(c.centerOfMass, vec(own))))
+		s.Release()
+		s, err = weighted, err2
+	}
+	return s, err
 }
 
 // rebuildCharacters drops characters whose controller size or slope changed,
@@ -412,6 +439,7 @@ func createCharacters(
 func pushChanges(
 	q *illusion.Query3[body, RigidBody, transform.Transform],
 	velocities *illusion.Query1[Velocity],
+	interpolated *illusion.Query1[Interpolated],
 	res *illusion.Res[world],
 	t *illusion.Res[illusion.Time],
 ) {
@@ -426,6 +454,9 @@ func pushChanges(
 			w.jolt.MoveKinematic(b.id, joltTransform(*tr), dt)
 		case moved:
 			w.jolt.SetTransform(b.id, joltTransform(*tr), true)
+			if in, ok := interpolated.Get(query.Entity()); ok {
+				in.snap = true
+			}
 		}
 		b.lastTransform = *tr
 

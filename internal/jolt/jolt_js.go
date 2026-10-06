@@ -412,3 +412,88 @@ func (w *World) SweepCapsule(center, delta [3]float32, radius, height float32, i
 func (c *Character) UpdateControlled(dt float32) {
 	mod().Call("ILL_Character_UpdateControlled", c.c, dt)
 }
+
+// The vehicle structs in types.go are laid out as in wasm32; glue.cpp asserts
+// the sizes.
+const _ = uint(unsafe.Sizeof(WheelSettings{})-144) + uint(144-unsafe.Sizeof(WheelSettings{})) +
+	uint(unsafe.Sizeof(VehicleSettings{})-128) + uint(128-unsafe.Sizeof(VehicleSettings{})) +
+	uint(unsafe.Sizeof(Differential{})-24) + uint(24-unsafe.Sizeof(Differential{})) +
+	uint(unsafe.Sizeof(AntiRollBar{})-12) + uint(12-unsafe.Sizeof(AntiRollBar{}))
+
+// OffsetCenterOfMass returns a new shape that is s with its center of mass
+// moved by offset. s is not consumed.
+func (s *Shape) OffsetCenterOfMass(offset [3]float32) (*Shape, error) {
+	m := mod()
+	return shapeOrErr(emscripten.Uint32(m.Call("ILL_Shape_OffsetCenterOfMass", s.s, emscripten.Arg(m, offset))))
+}
+
+// CenterOfMass is where the shape's center of mass is, in its own space.
+func (s *Shape) CenterOfMass() [3]float32 {
+	m := mod()
+	out := m.Alloc(12)
+	m.Call("ILL_Shape_GetCenterOfMass", s.s, out)
+	return emscripten.Read[[3]float32](m, out)
+}
+
+func readDefault[T any](fn string) T {
+	var v T
+	m := mod()
+	out := m.Alloc(int(unsafe.Sizeof(v)))
+	m.Call(fn, out)
+	return emscripten.Read[T](m, out)
+}
+
+// DefaultWheelSettings is Jolt's default wheel.
+func DefaultWheelSettings() WheelSettings { return readDefault[WheelSettings]("ILL_WheelDesc_Default") }
+
+// DefaultVehicleSettings is Jolt's default car: +Y up, +Z forward.
+func DefaultVehicleSettings() VehicleSettings {
+	return readDefault[VehicleSettings]("ILL_VehicleDesc_Default")
+}
+
+// DefaultDifferential is Jolt's default differential, with no wheels.
+func DefaultDifferential() Differential { return readDefault[Differential]("ILL_Differential_Default") }
+
+// CreateVehicle makes a dynamic body a vehicle. It reports false if the body
+// isn't dynamic, already is one, or wheels is empty.
+func (w *World) CreateVehicle(body BodyID, s VehicleSettings, wheels []WheelSettings, diffs []Differential, bars []AntiRollBar) bool {
+	if len(wheels) == 0 {
+		return false
+	}
+	m := mod()
+	return emscripten.Bool(m.Call("ILL_Vehicle_Create", w.w, uint32(body), emscripten.Arg(m, s),
+		emscripten.Slice(m, wheels), len(wheels), emscripten.Slice(m, diffs), len(diffs), emscripten.Slice(m, bars), len(bars)))
+}
+
+// DestroyVehicle takes a body's vehicle away, leaving the body. Destroying the
+// body does this too.
+func (w *World) DestroyVehicle(body BodyID) { mod().Call("ILL_Vehicle_Destroy", w.w, uint32(body)) }
+
+// SetVehicleInput sets what the driver does until it's next set: forward and
+// right from -1 to 1, brake and handBrake from 0 to 1.
+func (w *World) SetVehicleInput(body BodyID, forward, right, brake, handBrake float32) {
+	mod().Call("ILL_Vehicle_SetInput", w.w, uint32(body), forward, right, brake, handBrake)
+}
+
+// VehicleWheels appends a vehicle's wheels to buf.
+func (w *World) VehicleWheels(body BodyID, buf []WheelState) []WheelState {
+	m := mod()
+	const most = 16
+	out := m.Alloc(most * wheelStateFloats * 4)
+	n := m.Call("ILL_Vehicle_GetWheels", w.w, uint32(body), out, most).Int()
+	if n > most {
+		out = m.Alloc(n * wheelStateFloats * 4)
+		m.Call("ILL_Vehicle_GetWheels", w.w, uint32(body), out, n)
+	}
+	a := make([]float32, n*wheelStateFloats)
+	emscripten.ReadSlice(m, out, a)
+	return wheelStates(buf, a)
+}
+
+// VehicleStatus returns a vehicle's engine and motion.
+func (w *World) VehicleStatus(body BodyID) VehicleStatus {
+	m := mod()
+	out := m.Alloc(16)
+	m.Call("ILL_Vehicle_GetStatus", w.w, uint32(body), out)
+	return vehicleStatus(emscripten.Read[[4]float32](m, out))
+}

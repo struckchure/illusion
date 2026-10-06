@@ -350,3 +350,90 @@ func (w *World) SweepCapsule(center, delta [3]float32, radius, height float32, i
 	return RayHit{Body: BodyID(h.body), Fraction: float32(h.fraction), Point: [3]float32{float32(h.point[0]), float32(h.point[1]), float32(h.point[2])}, Normal: [3]float32{float32(h.normal[0]), float32(h.normal[1]), float32(h.normal[2])}}, true
 }
 func (c *Character) UpdateControlled(dt float32) { C.ILL_Character_UpdateControlled(c.c, C.float(dt)) }
+
+// The vehicle structs in types.go must match glue.h's layouts.
+const _ = uint(unsafe.Sizeof(WheelSettings{})-unsafe.Sizeof(C.ILL_WheelDesc{})) + uint(unsafe.Sizeof(C.ILL_WheelDesc{})-unsafe.Sizeof(WheelSettings{})) +
+	uint(unsafe.Sizeof(VehicleSettings{})-unsafe.Sizeof(C.ILL_VehicleDesc{})) + uint(unsafe.Sizeof(C.ILL_VehicleDesc{})-unsafe.Sizeof(VehicleSettings{})) +
+	uint(unsafe.Sizeof(Differential{})-unsafe.Sizeof(C.ILL_Differential{})) + uint(unsafe.Sizeof(C.ILL_Differential{})-unsafe.Sizeof(Differential{})) +
+	uint(unsafe.Sizeof(AntiRollBar{})-unsafe.Sizeof(C.ILL_AntiRollBar{})) + uint(unsafe.Sizeof(C.ILL_AntiRollBar{})-unsafe.Sizeof(AntiRollBar{})) +
+	uint(wheelStateFloats-C.ILL_WHEEL_STATE) + uint(C.ILL_WHEEL_STATE-wheelStateFloats) +
+	uint(Wheeled-C.ILL_WHEELED) + uint(C.ILL_WHEELED-Wheeled) + uint(Motorcycle-C.ILL_MOTORCYCLE) + uint(C.ILL_MOTORCYCLE-Motorcycle) +
+	uint(TestCylinder-C.ILL_TEST_CYLINDER) + uint(C.ILL_TEST_CYLINDER-TestCylinder) +
+	uint(TestRay-C.ILL_TEST_RAY) + uint(C.ILL_TEST_RAY-TestRay) + uint(TestSphere-C.ILL_TEST_SPHERE) + uint(C.ILL_TEST_SPHERE-TestSphere)
+
+// OffsetCenterOfMass returns a new shape that is s with its center of mass
+// moved by offset. s is not consumed.
+func (s *Shape) OffsetCenterOfMass(offset [3]float32) (*Shape, error) {
+	return shapeOrErr(C.ILL_Shape_OffsetCenterOfMass(s.s, fp(&offset[0])))
+}
+
+// CenterOfMass is where the shape's center of mass is, in its own space.
+func (s *Shape) CenterOfMass() (c [3]float32) {
+	C.ILL_Shape_GetCenterOfMass(s.s, fp(&c[0]))
+	return c
+}
+
+// DefaultWheelSettings is Jolt's default wheel.
+func DefaultWheelSettings() (s WheelSettings) {
+	C.ILL_WheelDesc_Default((*C.ILL_WheelDesc)(unsafe.Pointer(&s)))
+	return s
+}
+
+// DefaultVehicleSettings is Jolt's default car: +Y up, +Z forward.
+func DefaultVehicleSettings() (s VehicleSettings) {
+	C.ILL_VehicleDesc_Default((*C.ILL_VehicleDesc)(unsafe.Pointer(&s)))
+	return s
+}
+
+// DefaultDifferential is Jolt's default differential, with no wheels.
+func DefaultDifferential() (d Differential) {
+	C.ILL_Differential_Default((*C.ILL_Differential)(unsafe.Pointer(&d)))
+	return d
+}
+
+// CreateVehicle makes a dynamic body a vehicle. It reports false if the body
+// isn't dynamic, already is one, or wheels is empty.
+func (w *World) CreateVehicle(body BodyID, s VehicleSettings, wheels []WheelSettings, diffs []Differential, bars []AntiRollBar) bool {
+	if len(wheels) == 0 {
+		return false
+	}
+	var d *C.ILL_Differential
+	if len(diffs) > 0 {
+		d = (*C.ILL_Differential)(unsafe.Pointer(&diffs[0]))
+	}
+	var b *C.ILL_AntiRollBar
+	if len(bars) > 0 {
+		b = (*C.ILL_AntiRollBar)(unsafe.Pointer(&bars[0]))
+	}
+	return C.ILL_Vehicle_Create(w.w, C.ILL_BodyID(body), (*C.ILL_VehicleDesc)(unsafe.Pointer(&s)),
+		(*C.ILL_WheelDesc)(unsafe.Pointer(&wheels[0])), C.int(len(wheels)), d, C.int(len(diffs)), b, C.int(len(bars))) != 0
+}
+
+// DestroyVehicle takes a body's vehicle away, leaving the body. Destroying the
+// body does this too.
+func (w *World) DestroyVehicle(body BodyID) { C.ILL_Vehicle_Destroy(w.w, C.ILL_BodyID(body)) }
+
+// SetVehicleInput sets what the driver does until it's next set: forward and
+// right from -1 to 1, brake and handBrake from 0 to 1.
+func (w *World) SetVehicleInput(body BodyID, forward, right, brake, handBrake float32) {
+	C.ILL_Vehicle_SetInput(w.w, C.ILL_BodyID(body), C.float(forward), C.float(right), C.float(brake), C.float(handBrake))
+}
+
+// VehicleWheels appends a vehicle's wheels to buf.
+func (w *World) VehicleWheels(body BodyID, buf []WheelState) []WheelState {
+	var a [8 * wheelStateFloats]float32
+	n := int(C.ILL_Vehicle_GetWheels(w.w, C.ILL_BodyID(body), fp(&a[0]), 8))
+	if n > 8 {
+		big := make([]float32, n*wheelStateFloats)
+		C.ILL_Vehicle_GetWheels(w.w, C.ILL_BodyID(body), fp(&big[0]), C.int(n))
+		return wheelStates(buf, big)
+	}
+	return wheelStates(buf, a[:n*wheelStateFloats])
+}
+
+// VehicleStatus returns a vehicle's engine and motion.
+func (w *World) VehicleStatus(body BodyID) VehicleStatus {
+	var a [4]float32
+	C.ILL_Vehicle_GetStatus(w.w, C.ILL_BodyID(body), fp(&a[0]))
+	return vehicleStatus(a)
+}

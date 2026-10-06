@@ -90,3 +90,123 @@ type RayHit struct {
 	Point    [3]float32
 	Normal   [3]float32
 }
+
+// Vehicle controllers for VehicleSettings.Controller.
+const (
+	Wheeled    = 0
+	Motorcycle = 1
+)
+
+// Wheel collision testers for VehicleSettings.Tester.
+const (
+	TestCylinder = 0
+	TestRay      = 1
+	TestSphere   = 2
+)
+
+// WheelSettings describes one wheel of a vehicle, in the body's local space.
+// Start from DefaultWheelSettings. Its layout matches glue.h's ILL_WheelDesc.
+type WheelSettings struct {
+	Position      [3]float32 // where the suspension is attached
+	SuspensionDir [3]float32 // pointing down
+	SteeringAxis  [3]float32 // pointing up
+	WheelUp       [3]float32 // up at neutral steering
+	WheelForward  [3]float32 // forward at neutral steering
+	// ModelRight and ModelUp are the axes of the wheel's model that
+	// VehicleWheels turns to face the wheel's right and up.
+	ModelRight [3]float32
+	ModelUp    [3]float32
+
+	Radius, Width                float32
+	SuspensionMin, SuspensionMax float32 // suspension length fully raised and fully drooped
+	Preload                      float32
+	Frequency, Damping           float32 // the suspension spring: Hz, and 0..1 (or see Stiffness)
+	MaxSteer                     float32 // radians; negative steers the other way
+	MaxBrakeTorque               float32
+	MaxHandBrakeTorque           float32
+	Inertia, AngularDamping      float32
+	LongitudinalGrip             float32 // scales the tire's forward friction curve
+	LateralGrip                  float32 // scales the tire's sideways friction curve
+	// Stiffness, if 1, makes Frequency the spring's stiffness (N/m) and
+	// Damping its damping (N·s/m).
+	Stiffness int32
+}
+
+// VehicleSettings describes a vehicle's controller, engine and gearbox. Start
+// from DefaultVehicleSettings. Its layout matches glue.h's ILL_VehicleDesc.
+type VehicleSettings struct {
+	Up, Forward      [3]float32
+	MaxPitchRoll     float32 // radians; pi = no limit
+	Controller       int32   // Wheeled or Motorcycle
+	Tester           int32   // TestCylinder, TestRay or TestSphere
+	MaxTorque        float32 // Nm
+	MinRPM, MaxRPM   float32
+	EngineInertia    float32
+	EngineDamping    float32
+	Gears            [8]float32 // forward gear ratios, the first NumGears used
+	NumGears         int32
+	ReverseGear      float32
+	ShiftUpRPM       float32
+	ShiftDownRPM     float32
+	ClutchStrength   float32
+	SwitchTime       float32
+	LimitedSlipRatio float32 // between differentials
+	MaxLean          float32 // Motorcycle only, radians
+	LeanSpring       float32
+	LeanDamping      float32
+}
+
+// Differential sends the engine's torque to a pair of wheels. Start from
+// DefaultDifferential. Its layout matches glue.h's ILL_Differential.
+type Differential struct {
+	Left, Right int32   // wheel indices, -1 for none
+	Ratio       float32 // gearbox to wheel rotation
+	Split       float32 // 0 = all to the left wheel, 1 = all to the right
+	TorqueRatio float32 // share of the engine's torque
+	LimitedSlip float32
+}
+
+// AntiRollBar ties a pair of wheels' suspension together. Its layout matches
+// glue.h's ILL_AntiRollBar.
+type AntiRollBar struct {
+	Left, Right int32
+	Stiffness   float32 // N/m
+}
+
+// WheelState is a wheel as last simulated.
+type WheelState struct {
+	Transform  Transform // the wheel model's, in the body's space
+	Spin       float32   // angular velocity, rad/s
+	Steer      float32   // radians
+	Suspension float32   // length, m
+	Contact    bool
+}
+
+// VehicleStatus is a vehicle's engine and motion as last simulated.
+type VehicleStatus struct {
+	RPM      float32
+	Gear     int     // -1 reverse, 0 neutral, 1 first...
+	Speed    float32 // along the vehicle's forward, m/s
+	Touching int     // wheels touching something
+}
+
+const wheelStateFloats = 11 // ILL_WHEEL_STATE
+
+func wheelStates(buf []WheelState, a []float32) []WheelState {
+	for i := 0; i+wheelStateFloats <= len(a); i += wheelStateFloats {
+		var t [7]float32
+		copy(t[:], a[i:i+7])
+		buf = append(buf, WheelState{
+			Transform:  transformOf(t),
+			Spin:       a[i+7],
+			Steer:      a[i+8],
+			Suspension: a[i+9],
+			Contact:    a[i+10] != 0,
+		})
+	}
+	return buf
+}
+
+func vehicleStatus(a [4]float32) VehicleStatus {
+	return VehicleStatus{RPM: a[0], Gear: int(a[1]), Speed: a[2], Touching: int(a[3])}
+}

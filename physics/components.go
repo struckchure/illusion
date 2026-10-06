@@ -50,6 +50,9 @@ type Collider struct {
 	indices   []uint32
 	offset    rl.Vector3
 	hasOffset bool
+
+	centerOfMass    rl.Vector3
+	hasCenterOfMass bool
 }
 
 // Cuboid is a box with the given full width, height and length, matching
@@ -107,6 +110,14 @@ func MeshCollider(m rl.Mesh) Collider {
 // WithOffset moves the collider relative to the entity.
 func (c Collider) WithOffset(offset rl.Vector3) Collider {
 	c.offset, c.hasOffset = offset, true
+	return c
+}
+
+// WithCenterOfMass puts the body's center of mass at at, in the entity's
+// space, wherever the collider's shape would put it: say low between a
+// vehicle's wheels, to keep it on them.
+func (c Collider) WithCenterOfMass(at rl.Vector3) Collider {
+	c.centerOfMass, c.hasCenterOfMass = at, true
 	return c
 }
 
