@@ -92,6 +92,45 @@ func IsTextureValid(texture Texture2D) bool {
 	return texture.ID > 0 && texture.Width > 0 && texture.Height > 0 && texture.Format > 0 && texture.Mipmaps > 0
 }
 
+// Render targets, and the rlgl calls that make them (for shadow maps).
+
+func BeginTextureMode(target RenderTexture2D) { call("w_BeginTextureMode", arg(target)) }
+func EndTextureMode()                         { call("EndTextureMode") }
+func LoadFramebuffer() uint32                 { return uint32(call("rlLoadFramebuffer").Int()) }
+func UnloadFramebuffer(id uint32)             { call("rlUnloadFramebuffer", id) }
+func FramebufferComplete(id uint32) bool      { return truthy(call("w_FramebufferComplete", id)) }
+
+func LoadTextureDepth(width, height int32, useRenderBuffer bool) uint32 {
+	b := 0
+	if useRenderBuffer {
+		b = 1
+	}
+	return uint32(call("w_LoadTextureDepth", width, height, b).Int())
+}
+
+func FramebufferAttach(id, texId uint32, attachType, texType, mipLevel int32) {
+	call("rlFramebufferAttach", id, texId, attachType, texType, mipLevel)
+}
+
+// SetClipPlanes sets the near and far planes BeginMode3D projects with.
+func SetClipPlanes(nearPlane, farPlane float64) { call("rlSetClipPlanes", nearPlane, farPlane) }
+func GetCullDistanceNear() float64              { return call("rlGetCullDistanceNear").Float() }
+func GetCullDistanceFar() float64               { return call("rlGetCullDistanceFar").Float() }
+
+func ActiveTextureSlot(slot int32) { call("rlActiveTextureSlot", slot) }
+func EnableTexture(id uint32)      { call("rlEnableTexture", id) }
+func DisableTexture()              { call("rlDisableTexture") }
+
+func GetMatrixModelview() Matrix {
+	call("w_GetMatrixModelview", out())
+	return result[Matrix]()
+}
+
+func GetMatrixProjection() Matrix {
+	call("w_GetMatrixProjection", out())
+	return result[Matrix]()
+}
+
 // SetCullFace sets which faces are culled: 0 for front faces, 1 for back.
 func SetCullFace(mode int32) { call("rlSetCullFace", mode) }
 
@@ -99,4 +138,10 @@ func GetTextureIdDefault() uint32 { return uint32(call("rlGetTextureIdDefault").
 
 func DrawTexturePro(texture Texture2D, source, dest Rectangle, origin Vector2, rotation float32, tint color.RGBA) {
 	call("w_DrawTexturePro", arg(texture), arg(source), arg(dest), arg(origin), rotation, rgba(tint))
+}
+
+// CheckCollisionRecs reports whether two rectangles overlap, as raylib's.
+func CheckCollisionRecs(rec1, rec2 Rectangle) bool {
+	return rec1.X < rec2.X+rec2.Width && rec1.X+rec1.Width > rec2.X &&
+		rec1.Y < rec2.Y+rec2.Height && rec1.Y+rec1.Height > rec2.Y
 }

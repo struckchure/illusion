@@ -87,7 +87,9 @@ build_raylib() {
 		IsMouseButtonDown IsMouseButtonPressed IsMouseButtonReleased GetMouseWheelMove \
 		DrawGrid DrawFPS MeasureText GetPixelDataSize rlGetTextureIdDefault \
 		rlGetLocationUniform rlSetCullFace InitAudioDevice CloseAudioDevice IsAudioDeviceReady \
-		SetMasterVolume; do
+		SetMasterVolume EndTextureMode rlLoadFramebuffer rlFramebufferAttach rlUnloadFramebuffer \
+		rlActiveTextureSlot rlEnableTexture rlDisableTexture rlSetClipPlanes rlGetCullDistanceNear \
+		rlGetCullDistanceFar; do
 		exports=$exports,_$f
 	done
 	echo "link raylib.wasm"

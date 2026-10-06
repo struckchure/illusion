@@ -299,6 +299,14 @@ func SetShaderValue(shader Shader, locIndex int32, value []float32, uniformType 
 	call("w_SetShaderValue", shader.ID, locIndex, argSlice(value), int32(uniformType))
 }
 
+func SetShaderValueV(shader Shader, locIndex int32, value []float32, uniformType ShaderUniformDataType, count int32) {
+	call("w_SetShaderValueV", shader.ID, locIndex, argSlice(value), int32(uniformType), count)
+}
+
+func SetShaderValueMatrix(shader Shader, locIndex int32, mat Matrix) {
+	call("w_SetShaderValueMatrix", shader.ID, locIndex, arg(mat))
+}
+
 // Models stay in raylib's heap too. The Go Model mirrors its meshes
 // (registered for DrawMesh like generated ones), materials (whose maps and
 // shader locations are Go memory, as with LoadMaterialDefault) and

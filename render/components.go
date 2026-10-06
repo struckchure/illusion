@@ -72,6 +72,9 @@ type StandardMaterial struct {
 	Texture asset.Handle[Texture]
 	// Unlit ignores lights and draws BaseColor as is.
 	Unlit bool
+	// Emissive is light the surface gives off: it's lit at least this
+	// brightly, whatever lights it. Black (the zero value) for none.
+	Emissive color.RGBA
 }
 
 // Mesh3d draws a mesh at the entity's GlobalTransform.
@@ -142,10 +145,48 @@ type Camera3d struct {
 
 // DirectionalLight lights the scene from infinitely far away, like the sun,
 // shining along the entity's Forward direction. Only the first one found is
-// used.
+// used, and it casts the shadows (see [Shadows]).
 type DirectionalLight struct {
 	Color color.RGBA
+	// Brightness scales Color; 0 means 1.
+	Brightness float32
 }
+
+// PointLight lights what's round the entity's GlobalTransform, fading to
+// nothing at Range metres. It doesn't cast shadows. Only the MaxPointLights
+// that matter most to the camera light the scene (see selectLights); a light
+// on a Hidden entity still lights what's around it.
+type PointLight struct {
+	Color color.RGBA
+	// Intensity scales Color; 0 means 1.
+	Intensity float32
+	Range     float32
+}
+
+// Shadows is a resource: the directional light's shadows, drawn into a
+// depth map that covers a square round what the camera looks at. The zero
+// value (the default) has no shadows.
+type Shadows struct {
+	// Size is the shadow map's width and height in texels; 0 for no
+	// shadows.
+	Size int32
+	// Range is half the width of the square that's shadowed, in metres, and
+	// Reach how far towards the light from it things cast shadows into it (0
+	// means 4 * Range).
+	Range, Reach float32
+	// Bias is how far, in metres, something must be in front of a surface
+	// towards the light to shadow it, so surfaces don't shadow themselves;
+	// 0 means 3 cm.
+	Bias float32
+}
+
+// NotShadowCaster keeps an entity out of the shadow map: it's drawn, and
+// shadowed, but casts no shadow.
+type NotShadowCaster struct{}
+
+// ShadowOnly draws an entity into the shadow map but not to the camera: for
+// what's culled from view but casts a shadow into it.
+type ShadowOnly struct{}
 
 // AmbientLight is a resource: light that reaches every surface equally.
 type AmbientLight struct {
