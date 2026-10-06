@@ -89,7 +89,7 @@ build_raylib() {
 		rlGetLocationUniform rlSetCullFace InitAudioDevice CloseAudioDevice IsAudioDeviceReady \
 		SetMasterVolume EndTextureMode rlLoadFramebuffer rlFramebufferAttach rlUnloadFramebuffer \
 		rlActiveTextureSlot rlEnableTexture rlDisableTexture rlSetClipPlanes rlGetCullDistanceNear \
-		rlGetCullDistanceFar; do
+		rlGetCullDistanceFar BeginScissorMode EndScissorMode; do
 		exports=$exports,_$f
 	done
 	echo "link raylib.wasm"
