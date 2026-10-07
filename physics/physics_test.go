@@ -233,6 +233,41 @@ func TestCharacterController(t *testing.T) {
 	}
 }
 
+func TestCharacterSteppedEveryFewSteps(t *testing.T) {
+	app := newApp(t, func(cmd *illusion.Commands) {
+		cmd.Spawn(illusion.C(Static), illusion.C(Cuboid(40, 0.2, 40)), illusion.C(transform.FromXYZ(0, -0.1, 0)))
+		cmd.Spawn(illusion.C(tag("every")), illusion.C(CharacterController{Radius: 0.3, Height: 1.6}),
+			illusion.C(transform.FromXYZ(0, 1, -2)))
+		cmd.Spawn(illusion.C(tag("third")), illusion.C(CharacterController{Radius: 0.3, Height: 1.6, Every: 3}),
+			illusion.C(transform.FromXYZ(0, 1, 2)))
+	})
+	stepped, steps := 0, 0
+	app.AddSystems(illusion.FixedUpdate, illusion.Fn1(func(q *illusion.Query1[CharacterController]) {
+		q.Each(func(_ ecs.Entity, c *CharacterController) { c.Walk = rl.Vector3{X: 1.5} })
+	}))
+	app.AddSystems(illusion.FixedPostUpdate, illusion.Fn1(func(q *illusion.Query1[CharacterController]) {
+		q.Each(func(_ ecs.Entity, c *CharacterController) {
+			if c.Every == 3 {
+				steps++
+				if c.Stepped {
+					stepped++
+				}
+			}
+		})
+	}))
+	run(app, 2)
+	if stepped < steps/3-1 || stepped > steps/3+1 {
+		t.Fatalf("stepped %d of %d steps, want about a third", stepped, steps)
+	}
+	every, third := translation(app, find(app, "every")), translation(app, find(app, "third"))
+	if math.Abs(float64(every.X-third.X)) > 0.1 {
+		t.Fatalf("stepped every third step, it should keep up: at x=%v against x=%v", third.X, every.X)
+	}
+	if !ecs.NewMap[CharacterController](app.World).Get(find(app, "third")).Grounded {
+		t.Fatal("stepped every third step, it should still stand on the ground")
+	}
+}
+
 func TestCharacterCollisionEvents(t *testing.T) {
 	var events []CollisionStarted
 	app := newApp(t, func(cmd *illusion.Commands) {

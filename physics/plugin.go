@@ -175,6 +175,10 @@ type character struct {
 	// The controller settings the character was built from; a change
 	// rebuilds it.
 	config characterConfig
+	// turn counts fixed steps, for Every; owed is the time since the
+	// character was last stepped.
+	turn int
+	owed float32
 }
 
 type characterConfig struct {
@@ -480,6 +484,18 @@ func moveCharacters(
 	query := q.Iter()
 	for query.Next() {
 		cc, ch, tr := query.Get()
+		if ch.turn == 0 {
+			// Spread characters stepped every so often over the steps.
+			ch.turn = int(query.Entity().ID())
+		}
+		ch.turn++
+		ch.owed += dt
+		cc.Stepped = cc.Every <= 1 || ch.turn%cc.Every == 0
+		if !cc.Stepped {
+			continue
+		}
+		dt := ch.owed
+		ch.owed = 0
 		// A Transform moved by game code teleports the character.
 		if p := ch.c.Position(); vec(p) != tr.Translation {
 			ch.c.SetPosition(v3(tr.Translation))
@@ -551,6 +567,9 @@ func pullCharacters(q *illusion.Query3[CharacterController, character, transform
 	query := q.Iter()
 	for query.Next() {
 		cc, ch, tr := query.Get()
+		if !cc.Stepped {
+			continue
+		}
 		tr.Translation = vec(ch.c.Position())
 		cc.Velocity = vec(ch.c.Velocity())
 		cc.GroundNormal = vec(ch.c.GroundNormal())
