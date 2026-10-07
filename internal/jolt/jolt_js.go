@@ -30,7 +30,7 @@ type (
 		AngularDamping  float32
 		GravityFactor   float32
 		Mass            float32
-		_               uint32
+		Character       int32
 		UserData        uint64
 	}
 	cContactEvent struct {
@@ -226,6 +226,7 @@ func (w *World) CreateBody(s BodySettings) BodyID {
 	c.AngularDamping = s.AngularDamping
 	c.GravityFactor = s.GravityFactor
 	c.Mass = s.Mass
+	c.Character = cbool(s.Character)
 	m := mod()
 	return BodyID(emscripten.Uint32(m.Call("ILL_Body_Create", w.w, emscripten.Arg(m, c))))
 }

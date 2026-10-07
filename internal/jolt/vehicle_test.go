@@ -7,7 +7,7 @@ import (
 
 // newCar puts a 1500 kg car (or, with Motorcycle, a 2-wheeled bike) on the
 // test world's ground, facing +Z.
-func newCar(t *testing.T, w *World, controller int32) BodyID {
+func newCar(t *testing.T, w *World, controller int32, continuous ...bool) BodyID {
 	t.Helper()
 	halfWidth, halfLength := float32(0.9), float32(2)
 	if controller == Motorcycle {
@@ -27,6 +27,9 @@ func newCar(t *testing.T, w *World, controller int32) BodyID {
 	s := DefaultBodySettings(low)
 	s.Transform.Position = [3]float32{0, 1, 0}
 	s.Mass = 1500
+	if len(continuous) > 0 {
+		s.Continuous = continuous[0]
+	}
 	if controller == Motorcycle {
 		s.Mass = 240
 	}

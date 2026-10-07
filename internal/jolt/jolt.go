@@ -199,6 +199,7 @@ func (w *World) CreateBody(s BodySettings) BodyID {
 	c.angularDamping = C.float(s.AngularDamping)
 	c.gravityFactor = C.float(s.GravityFactor)
 	c.mass = C.float(s.Mass)
+	c.character = cbool(s.Character)
 	return BodyID(C.ILL_Body_Create(w.w, &c))
 }
 

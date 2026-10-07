@@ -60,6 +60,7 @@ typedef struct ILL_BodySettings {
 	float angularDamping;
 	float gravityFactor;
 	float mass;          // <= 0: computed from the shape
+	int character;       // character/ragdoll body: yields to vehicles
 	uint64_t userData;
 } ILL_BodySettings;
 

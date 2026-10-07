@@ -66,6 +66,7 @@ type BodySettings struct {
 	Sensor          bool
 	AllowSleeping   bool
 	Continuous      bool
+	Character       bool // character/ragdoll body: yields to vehicles
 	AllowedDOFs     uint32
 	Friction        float32
 	Restitution     float32

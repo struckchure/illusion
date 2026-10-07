@@ -160,6 +160,11 @@ type LockRotation struct{}
 // walls, at some cost.
 type ContinuousCollision struct{}
 
+// CharacterBody marks a character or ragdoll rigid body. Vehicles push it
+// without receiving collision impulses, and wheels ignore it as ground.
+// CharacterController bodies have this behavior automatically.
+type CharacterBody struct{}
+
 // Velocity is a body's velocity. The plugin writes it after every step;
 // change it to set the velocity.
 type Velocity struct {

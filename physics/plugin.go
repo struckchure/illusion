@@ -130,6 +130,7 @@ type bodyConfig struct {
 	rigidBody                   RigidBody
 	collider                    colliderKey
 	sensor, lock, continuous    bool
+	characterBody               bool
 	material                    Material
 	mass                        Mass
 	gravityScale                GravityScale
@@ -224,16 +225,17 @@ func removeStaleBodies(
 
 // optional reads the optional per-body components.
 type optional struct {
-	world        *ecs.World
-	sensor       *ecs.Map[Sensor]
-	material     *ecs.Map[Material]
-	mass         *ecs.Map[Mass]
-	gravityScale *ecs.Map[GravityScale]
-	damping      *ecs.Map[Damping]
-	lock         *ecs.Map[LockRotation]
-	continuous   *ecs.Map[ContinuousCollision]
-	velocity     *ecs.Map[Velocity]
-	vehicle      *ecs.Map[Vehicle]
+	world         *ecs.World
+	sensor        *ecs.Map[Sensor]
+	material      *ecs.Map[Material]
+	mass          *ecs.Map[Mass]
+	gravityScale  *ecs.Map[GravityScale]
+	damping       *ecs.Map[Damping]
+	lock          *ecs.Map[LockRotation]
+	continuous    *ecs.Map[ContinuousCollision]
+	characterBody *ecs.Map[CharacterBody]
+	velocity      *ecs.Map[Velocity]
+	vehicle       *ecs.Map[Vehicle]
 }
 
 func (o *optional) InitParam(w *ecs.World) {
@@ -245,6 +247,7 @@ func (o *optional) InitParam(w *ecs.World) {
 	o.damping = ecs.NewMap[Damping](w)
 	o.lock = ecs.NewMap[LockRotation](w)
 	o.continuous = ecs.NewMap[ContinuousCollision](w)
+	o.characterBody = ecs.NewMap[CharacterBody](w)
 	o.velocity = ecs.NewMap[Velocity](w)
 	o.vehicle = ecs.NewMap[Vehicle](w)
 }
@@ -252,11 +255,12 @@ func (o *optional) InitParam(w *ecs.World) {
 // config reads the settings e's body should be built from.
 func (o *optional) config(e ecs.Entity, rb *RigidBody, col *Collider) bodyConfig {
 	c := bodyConfig{
-		rigidBody:  *rb,
-		collider:   keyOf(col),
-		sensor:     o.sensor.Has(e),
-		lock:       o.lock.Has(e),
-		continuous: o.continuous.Has(e),
+		rigidBody:     *rb,
+		collider:      keyOf(col),
+		sensor:        o.sensor.Has(e),
+		lock:          o.lock.Has(e),
+		continuous:    o.continuous.Has(e),
+		characterBody: o.characterBody.Has(e),
 	}
 	if m := o.material.Get(e); m != nil {
 		c.material, c.hasMaterial = *m, true
@@ -330,6 +334,7 @@ func createBodies(
 		}
 		s.Sensor = cfg.sensor
 		s.Continuous = cfg.continuous
+		s.Character = cfg.characterBody
 		if cfg.lock {
 			s.AllowedDOFs = jolt.TranslationX | jolt.TranslationY | jolt.TranslationZ
 		}

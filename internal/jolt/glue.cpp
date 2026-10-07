@@ -46,9 +46,18 @@ using namespace JPH;
 
 namespace {
 
-// Two object layers: static geometry only needs to test against moving things.
+// All moving roles share a broad phase. Characters yield to vehicles,
+// while other body pairs retain their normal response.
 constexpr ObjectLayer kNonMoving = 0;
 constexpr ObjectLayer kMoving = 1;
+constexpr ObjectLayer kCharacter = 2;
+constexpr ObjectLayer kVehicle = 3;
+
+class WheelLayers final : public ObjectLayerFilter {
+public:
+	bool ShouldCollide(ObjectLayer layer) const override { return layer != kCharacter; }
+};
+const WheelLayers kWheelLayers;
 constexpr BroadPhaseLayer kBPNonMoving(0);
 constexpr BroadPhaseLayer kBPMoving(1);
 
@@ -75,7 +84,7 @@ public:
 class ObjectPairs final : public ObjectLayerPairFilter {
 public:
 	bool ShouldCollide(ObjectLayer a, ObjectLayer b) const override {
-		return a == kNonMoving ? b == kMoving : true;
+		return a != kNonMoving || b != kNonMoving;
 	}
 };
 
@@ -97,13 +106,18 @@ public:
 		}
 	};
 
-	void OnContactAdded(const Body& b1, const Body& b2, const ContactManifold& m, ContactSettings&) override {
+	void OnContactAdded(const Body& b1, const Body& b2, const ContactManifold& m, ContactSettings& settings) override {
+		characterResponse(b1, b2, settings);
 		RVec3 p = m.mRelativeContactPointsOn1.empty() ? m.mBaseOffset : m.GetWorldSpaceContactPointOn1(0);
 		float point[3] = {float(p.GetX()), float(p.GetY()), float(p.GetZ())};
 		float normal[3] = {m.mWorldSpaceNormal.GetX(), m.mWorldSpaceNormal.GetY(), m.mWorldSpaceNormal.GetZ()};
 		Add({b1.GetID().GetIndexAndSequenceNumber(), m.mSubShapeID1.GetValue(),
 				b2.GetID().GetIndexAndSequenceNumber(), m.mSubShapeID2.GetValue()},
 			point, normal);
+	}
+
+	void OnContactPersisted(const Body& b1, const Body& b2, const ContactManifold&, ContactSettings& settings) override {
+		characterResponse(b1, b2, settings);
 	}
 
 	void OnContactRemoved(const SubShapeIDPair& pair) override {
@@ -200,6 +214,16 @@ public:
 	}
 
 private:
+	static void characterResponse(const Body& b1, const Body& b2, ContactSettings& settings) {
+		// The character receives the response; neither contact torque nor
+		// penetration recovery may rotate the vehicle.
+		if (b1.GetObjectLayer() == kVehicle && b2.GetObjectLayer() == kCharacter) {
+			settings.mInvMassScale1 = settings.mInvInertiaScale1 = 0;
+		} else if (b2.GetObjectLayer() == kVehicle && b1.GetObjectLayer() == kCharacter) {
+			settings.mInvMassScale2 = settings.mInvInertiaScale2 = 0;
+		}
+	}
+
 	struct SubState {
 		bool asleep; // removed by Jolt because a body fell asleep
 		bool seen;   // added this step
@@ -267,13 +291,18 @@ public:
 	CharacterContacts(PhysicsSystem& system, ContactBuffer& buffer) : system(system), buffer(buffer) {}
 
 	void OnContactAdded(const CharacterVirtual* ch, const BodyID& other, const SubShapeID& sub, RVec3Arg point,
-		Vec3Arg normal, CharacterContactSettings&) override {
+		Vec3Arg normal, CharacterContactSettings& settings) override {
+		yieldToVehicle(other, settings);
 		if (!reportable(other)) {
 			return;
 		}
 		float p[3] = {float(point.GetX()), float(point.GetY()), float(point.GetZ())};
 		float n[3] = {normal.GetX(), normal.GetY(), normal.GetZ()};
 		buffer.Add(key(ch, other, sub), p, n);
+	}
+
+	void OnContactPersisted(const CharacterVirtual*, const BodyID& other, const SubShapeID&, RVec3Arg, Vec3Arg, CharacterContactSettings& settings) override {
+		yieldToVehicle(other, settings);
 	}
 
 	void OnContactRemoved(const CharacterVirtual* ch, const BodyID& other, const SubShapeID& sub) override {
@@ -284,6 +313,13 @@ public:
 	}
 
 private:
+	void yieldToVehicle(const BodyID& other, CharacterContactSettings& settings) {
+		BodyLockRead lock(system.GetBodyLockInterfaceNoLock(), other);
+		if (lock.Succeeded() && lock.GetBody().GetObjectLayer() == kVehicle) {
+			settings.mCanReceiveImpulses = false;
+		}
+	}
+
 	static ContactBuffer::SubKey key(const CharacterVirtual* ch, const BodyID& other, const SubShapeID& sub) {
 		return {ch->GetInnerBodyID().GetIndexAndSequenceNumber(), 0, other.GetIndexAndSequenceNumber(), sub.GetValue()};
 	}
@@ -379,6 +415,7 @@ struct ILL_World {
 		system.RemoveStepListener(it->second.constraint);
 		system.RemoveConstraint(it->second.constraint);
 		vehicles.erase(it);
+		system.GetBodyInterface().SetObjectLayer(BodyID(body), kMoving);
 	}
 };
 
@@ -503,7 +540,7 @@ ILL_BodyID ILL_Body_Create(ILL_World* w, const ILL_BodySettings* s) {
 	if (s->sensor && motion == EMotionType::Static) {
 		motion = EMotionType::Kinematic;
 	}
-	ObjectLayer layer = motion == EMotionType::Static ? kNonMoving : kMoving;
+	ObjectLayer layer = motion == EMotionType::Static ? kNonMoving : s->character ? kCharacter : kMoving;
 
 	BodyCreationSettings bs(shapeOf(s->shape), rvec3(s->transform), quat(s->transform + 3), motion, layer);
 	bs.mLinearVelocity = vec3(s->linearVelocity);
@@ -666,7 +703,7 @@ ILL_Character* ILL_Character_New(ILL_World* w, ILL_Shape* shape, const float pos
 	s.mSupportingVolume = Plane(Vec3::sAxisY(), -supportRadius);
 	// An inner rigid body lets sensors and other bodies see the character.
 	s.mInnerBodyShape = shapeOf(shape);
-	s.mInnerBodyLayer = kMoving;
+	s.mInnerBodyLayer = kCharacter;
 	ILL_Character* c = new ILL_Character{w, nullptr};
 	c->ch = new CharacterVirtual(&s, rvec3(position), Quat::sIdentity(), 0, &w->system);
 	c->ch->SetListener(&w->characterContacts);
@@ -862,22 +899,26 @@ int ILL_Vehicle_Create(ILL_World* w, ILL_BodyID raw, const ILL_VehicleDesc* d, c
 		return 0;
 	}
 	v.constraint = new VehicleConstraint(lock.GetBody(), vs);
+	VehicleCollisionTester* tester = nullptr;
 	switch (d->tester) {
 	case ILL_TEST_RAY:
-		v.constraint->SetVehicleCollisionTester(new VehicleCollisionTesterRay(kMoving, vs.mUp));
+		tester = new VehicleCollisionTesterRay(kMoving, vs.mUp);
 		break;
 	case ILL_TEST_SPHERE: {
 		float r = FLT_MAX;
 		for (int i = 0; i < numWheels; i++) {
 			r = std::min(r, 0.5f * wheels[i].width);
 		}
-		v.constraint->SetVehicleCollisionTester(new VehicleCollisionTesterCastSphere(kMoving, r, vs.mUp));
+		tester = new VehicleCollisionTesterCastSphere(kMoving, r, vs.mUp);
 		break;
 	}
 	default:
-		v.constraint->SetVehicleCollisionTester(new VehicleCollisionTesterCastCylinder(kMoving));
+		tester = new VehicleCollisionTesterCastCylinder(kMoving);
 	}
+	tester->SetObjectLayerFilter(&kWheelLayers);
+	v.constraint->SetVehicleCollisionTester(tester);
 	lock.ReleaseLock();
+	w->system.GetBodyInterface().SetObjectLayer(BodyID(raw), kVehicle);
 	w->system.AddConstraint(v.constraint);
 	w->system.AddStepListener(v.constraint);
 	w->vehicles.emplace(raw, std::move(v));
