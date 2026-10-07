@@ -624,6 +624,7 @@ void ILL_Body_AddAngularImpulse(ILL_World* w, ILL_BodyID id, const float i[3]) {
 
 int ILL_Body_IsActive(ILL_World* w, ILL_BodyID id) { return w->system.GetBodyInterface().IsActive(BodyID(id)); }
 void ILL_Body_Activate(ILL_World* w, ILL_BodyID id) { w->system.GetBodyInterface().ActivateBody(BodyID(id)); }
+void ILL_Body_Deactivate(ILL_World* w, ILL_BodyID id) { w->system.GetBodyInterface().DeactivateBody(BodyID(id)); }
 
 int ILL_World_DrainContacts(ILL_World* w, ILL_ContactEvent* out, int cap) { return w->contacts.Drain(out, cap); }
 

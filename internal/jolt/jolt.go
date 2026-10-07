@@ -262,6 +262,9 @@ func (w *World) AddAngularImpulse(id BodyID, i [3]float32) {
 // IsActive reports whether a body is awake.
 func (w *World) IsActive(id BodyID) bool { return C.ILL_Body_IsActive(w.w, C.ILL_BodyID(id)) != 0 }
 
+// Deactivate puts a body to sleep and clears its velocity.
+func (w *World) Deactivate(id BodyID) { C.ILL_Body_Deactivate(w.w, C.ILL_BodyID(id)) }
+
 // Activate wakes a body.
 func (w *World) Activate(id BodyID) { C.ILL_Body_Activate(w.w, C.ILL_BodyID(id)) }
 

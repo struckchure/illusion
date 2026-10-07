@@ -412,3 +412,28 @@ func TestResizingACharacterRebuildsIt(t *testing.T) {
 		t.Fatalf("the rebuilt 1m character should stand at y≈0.5, got %v", y)
 	}
 }
+
+func TestSleepClearsCachedVelocityAndImpulsesWakeTheBody(t *testing.T) {
+	app := newApp(t, func(cmd *illusion.Commands) {
+		cmd.Spawn(illusion.C(tag("sleeper")), illusion.C(Dynamic), illusion.C(Cuboid(1, 1, 1)),
+			illusion.C(transform.FromXYZ(0, .5, 0)), illusion.C(Mass(10)), illusion.C(Velocity{Linear: rl.Vector3{X: .1}}))
+	})
+	run(app, .1)
+	e := find(app, "sleeper")
+	var p Physics
+	p.InitParam(app.World)
+	p.Sleep(e)
+	if !p.Asleep(e) || *ecs.NewMap[Velocity](app.World).Get(e) != (Velocity{}) {
+		t.Fatal("Sleep did not clear body and component velocity")
+	}
+	before := translation(app, e)
+	run(app, .5)
+	if !p.Asleep(e) || translation(app, e) != before {
+		t.Fatal("Prepare reapplied stale velocity and woke the body")
+	}
+	p.AddImpulse(e, rl.Vector3{X: 50, Y: 20})
+	run(app, .2)
+	if p.Asleep(e) || translation(app, e).X < before.X+.5 {
+		t.Fatal("a later impact did not wake the body")
+	}
+}

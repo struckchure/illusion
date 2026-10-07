@@ -79,6 +79,7 @@ void ILL_Body_AddImpulse(ILL_World* w, ILL_BodyID id, const float i[3]);
 void ILL_Body_AddAngularImpulse(ILL_World* w, ILL_BodyID id, const float i[3]);
 int ILL_Body_IsActive(ILL_World* w, ILL_BodyID id);
 void ILL_Body_Activate(ILL_World* w, ILL_BodyID id);
+void ILL_Body_Deactivate(ILL_World* w, ILL_BodyID id);
 
 typedef struct ILL_ContactEvent {
 	ILL_BodyID body1;

@@ -295,6 +295,9 @@ func (w *World) IsActive(id BodyID) bool {
 	return emscripten.Bool(mod().Call("ILL_Body_IsActive", w.w, uint32(id)))
 }
 
+// Deactivate puts a body to sleep and clears its velocity.
+func (w *World) Deactivate(id BodyID) { mod().Call("ILL_Body_Deactivate", w.w, uint32(id)) }
+
 // Activate wakes a body.
 func (w *World) Activate(id BodyID) { mod().Call("ILL_Body_Activate", w.w, uint32(id)) }
 

@@ -12,9 +12,10 @@ import (
 // FixedUpdate. Calls on entities without a body yet (spawned this step) do
 // nothing.
 type Physics struct {
-	world  *world
-	bodies *ecs.Map[body]
-	chars  *ecs.Map[character]
+	world      *world
+	bodies     *ecs.Map[body]
+	chars      *ecs.Map[character]
+	velocities *ecs.Map[Velocity]
 }
 
 // InitParam implements [illusion.Param].
@@ -25,6 +26,7 @@ func (p *Physics) InitParam(w *ecs.World) {
 	}
 	p.bodies = ecs.NewMap[body](w)
 	p.chars = ecs.NewMap[character](w)
+	p.velocities = ecs.NewMap[Velocity](w)
 }
 
 func (p *Physics) id(e ecs.Entity) (jolt.BodyID, bool) {
@@ -66,6 +68,21 @@ func (p *Physics) AddAngularImpulse(e ecs.Entity, impulse rl.Vector3) {
 func (p *Physics) Wake(e ecs.Entity) {
 	if id, ok := p.id(e); ok {
 		p.world.jolt.Activate(id)
+	}
+}
+
+// Sleep puts a dynamic body to rest until an impact, force or Wake activates it.
+// It clears both simulation and component velocity so Prepare cannot wake it
+// again by reapplying a stale velocity.
+func (p *Physics) Sleep(e ecs.Entity) {
+	b := p.bodies.Get(e)
+	if b == nil || b.config.rigidBody != Dynamic {
+		return
+	}
+	p.world.jolt.Deactivate(b.id)
+	b.lastVelocity = Velocity{}
+	if v := p.velocities.Get(e); v != nil {
+		*v = Velocity{}
 	}
 }
 
