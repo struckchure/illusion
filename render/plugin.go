@@ -130,6 +130,7 @@ type renderer struct {
 	shadow shadowMap
 
 	posed map[*rl.Mesh]appliedPose // last pose applied to each model, by its meshes
+	draws []posedDraw              // this pass's models, in the order they're drawn
 }
 
 func initRenderer(res *illusion.Res[renderer], textures *illusion.Res[asset.Assets[Texture]], shader *illusion.Res[Shader]) {
@@ -367,6 +368,7 @@ func drawModels(
 	textureStore := parts.textures.Get()
 	dt := parts.time.Get().DeltaSecs()
 
+	r.draws = r.draws[:0]
 	query := q.Iter()
 	for query.Next() {
 		m, g := query.Get()
@@ -374,15 +376,19 @@ func drawModels(
 		if model == nil {
 			continue
 		}
-		matrix := rl.MatrixMultiply(model.Transform, g.Matrix)
+		r.draws = append(r.draws, poseDraw(query.Entity(), model, rl.MatrixMultiply(model.Transform, g.Matrix), players, animStore))
+	}
+	byPose(r.draws)
+	for _, d := range r.draws {
+		e, model, matrix := d.entity, d.model, d.matrix
 		// The pose lives in the shared model, so apply this entity's right
 		// before drawing it.
-		if p, ok := players.Get(query.Entity()); ok {
+		if p, ok := players.Get(e); ok {
 			if a := animStore.Get(p.Animations); a != nil {
 				if r.posed == nil {
 					r.posed = map[*rl.Mesh]appliedPose{}
 				}
-				if cloth, ok := parts.cloth.Get(query.Entity()); ok && simulate(cloth, &model.Model, p, a, matrix, dt) {
+				if cloth, ok := parts.cloth.Get(e); ok && simulate(cloth, &model.Model, p, a, matrix, dt) {
 					// The meshes now hold this entity's cloth: whoever
 					// draws the model next has to pose it again.
 					delete(r.posed, model.Meshes)
@@ -392,8 +398,8 @@ func drawModels(
 			}
 		}
 		meshes := model.GetMeshes()
-		mp, _ := parts.q.Get(query.Entity())
-		override := materialFor(withMaterial, materialStore, query.Entity())
+		mp, _ := parts.q.Get(e)
+		override := materialFor(withMaterial, materialStore, e)
 		own := model.GetMaterials()
 		meshMaterial := unsafe.Slice(model.MeshMaterial, model.MeshCount)
 
@@ -437,7 +443,7 @@ func drawModels(
 		draw(r.material.Shader, nil)
 
 		// The passes, while the meshes still hold this entity's pose.
-		if passes, ok := parts.passes.Get(query.Entity()); ok {
+		if passes, ok := parts.passes.Get(e); ok {
 			for _, pass := range *passes {
 				if pass.Shader == nil {
 					continue

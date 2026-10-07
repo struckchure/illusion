@@ -1,8 +1,11 @@
 package render
 
 import (
+	"cmp"
 	"errors"
 	"math"
+	"slices"
+	"unsafe"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/mlange-42/ark/ecs"
@@ -183,6 +186,12 @@ func (p *AnimationPlayer) FadeIn(seconds float32) *AnimationPlayer {
 	return p
 }
 
+// Settle ends any crossfade at once, leaving the current clip alone to pose
+// the model.
+func (p *AnimationPlayer) Settle() {
+	p.fade, p.fadeLength = 0, 0
+}
+
 // Replay starts the current clip over.
 func (p *AnimationPlayer) Replay() {
 	p.current.time = 0
@@ -334,17 +343,11 @@ func poseModel(model rl.Model, p *AnimationPlayer, a *Animations, last map[*rl.M
 		last[model.Meshes] = appliedPose{custom: true, scratch: cached.scratch}
 		return
 	}
-	cur, ok := a.Clip(p.current.clip)
-	if !ok || !a.fits(&model, cur) {
+	want, ok := clipPose(model, p, a)
+	if !ok {
 		return
 	}
-	want := appliedPose{anims: a, cur: cur, prev: -1, frame: a.frame(cur, p.current.time, p.current.once), scratch: last[model.Meshes].scratch}
-	if p.fadeLength > 0 {
-		if prev, ok := a.Clip(p.previous.clip); ok && a.fits(&model, prev) {
-			want.prev, want.prevFrame = prev, a.frame(prev, p.previous.time, p.previous.once)
-			want.blend = min(p.fade/p.fadeLength, 1)
-		}
-	}
+	want.scratch = last[model.Meshes].scratch
 	if got, ok := last[model.Meshes]; ok && got == want {
 		return
 	}
@@ -352,8 +355,77 @@ func poseModel(model rl.Model, p *AnimationPlayer, a *Animations, last map[*rl.M
 	restore := routeSkinnedNormals(model)
 	defer restore()
 	if want.prev >= 0 {
-		rl.UpdateModelAnimationEx(model, a.Clips[want.prev], want.prevFrame, a.Clips[cur], want.frame, want.blend)
+		rl.UpdateModelAnimationEx(model, a.Clips[want.prev], want.prevFrame, a.Clips[want.cur], want.frame, want.blend)
 		return
 	}
-	rl.UpdateModelAnimation(model, a.Clips[cur], want.frame)
+	rl.UpdateModelAnimation(model, a.Clips[want.cur], want.frame)
+}
+
+// clipPose is the pose the player's clips put model in. ok is false if the
+// clip isn't loaded or doesn't fit the model's skeleton.
+func clipPose(model rl.Model, p *AnimationPlayer, a *Animations) (want appliedPose, ok bool) {
+	cur, ok := a.Clip(p.current.clip)
+	if !ok || !a.fits(&model, cur) {
+		return appliedPose{}, false
+	}
+	want = appliedPose{anims: a, cur: cur, prev: -1, frame: a.frame(cur, p.current.time, p.current.once)}
+	if p.fadeLength > 0 {
+		if prev, ok := a.Clip(p.previous.clip); ok && a.fits(&model, prev) {
+			want.prev, want.prevFrame = prev, a.frame(prev, p.previous.time, p.previous.once)
+			want.blend = min(p.fade/p.fadeLength, 1)
+		}
+	}
+	return want, true
+}
+
+// posedDraw is a model to draw, where, and the pose its clips put it in, if
+// they do.
+type posedDraw struct {
+	entity ecs.Entity
+	model  *Model
+	matrix rl.Matrix
+	pose   appliedPose
+	clip   bool // posed by its clips: pose is set
+}
+
+// poseDraw is entity's model to draw at matrix, with the pose its player's
+// clips put it in.
+func poseDraw(entity ecs.Entity, model *Model, matrix rl.Matrix, players *illusion.Query1[AnimationPlayer], anims *asset.Assets[Animations]) posedDraw {
+	d := posedDraw{entity: entity, model: model, matrix: matrix}
+	if p, ok := players.Get(entity); ok && len(p.Pose) == 0 {
+		if a := anims.Get(p.Animations); a != nil {
+			d.pose, d.clip = clipPose(model.Model, p, a)
+		}
+	}
+	return d
+}
+
+// byPose orders draws so the models their clips pose the same way are drawn
+// together. A pose is skinned into the model's meshes, which every entity
+// drawing the model shares, so it's skinned once for a run of them; drawn
+// in the order they're found, a crowd playing a few clips would be skinned
+// again for nearly every one. Draws not posed by clips keep their order,
+// first.
+func byPose(draws []posedDraw) {
+	slices.SortStableFunc(draws, func(x, y posedDraw) int {
+		a, b := x.pose, y.pose
+		switch {
+		case x.clip != y.clip:
+			if x.clip {
+				return 1
+			}
+			return -1
+		case !x.clip:
+			return 0
+		}
+		return cmp.Or(
+			cmp.Compare(uintptr(unsafe.Pointer(x.model.Meshes)), uintptr(unsafe.Pointer(y.model.Meshes))),
+			cmp.Compare(uintptr(unsafe.Pointer(a.anims)), uintptr(unsafe.Pointer(b.anims))),
+			cmp.Compare(a.cur, b.cur),
+			cmp.Compare(a.frame, b.frame),
+			cmp.Compare(a.prev, b.prev),
+			cmp.Compare(a.prevFrame, b.prevFrame),
+			cmp.Compare(a.blend, b.blend),
+		)
+	})
 }

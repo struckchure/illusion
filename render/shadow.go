@@ -248,6 +248,7 @@ func (r *renderer) drawCasters(view shadowView, c *shadowCasters, materialStore 
 		rl.DrawMesh(mesh.Mesh, draw, g.Matrix)
 	}
 
+	r.draws = r.draws[:0]
 	models := c.models.Iter()
 	for models.Next() {
 		m, g := models.Get()
@@ -259,7 +260,12 @@ func (r *renderer) drawCasters(view shadowView, c *shadowCasters, materialStore 
 		if b := r.modelBounds(m.Model, model); !view.sees(rl.Vector3Transform(b.center, matrix), b.radius*matrixScale(matrix)) {
 			continue
 		}
-		if p, ok := c.players.Get(models.Entity()); ok {
+		r.draws = append(r.draws, poseDraw(models.Entity(), model, matrix, &c.players, animStore))
+	}
+	byPose(r.draws)
+	for _, d := range r.draws {
+		e, model, matrix := d.entity, d.model, d.matrix
+		if p, ok := c.players.Get(e); ok {
 			if a := animStore.Get(p.Animations); a != nil {
 				if r.posed == nil {
 					r.posed = map[*rl.Mesh]appliedPose{}
@@ -269,11 +275,11 @@ func (r *renderer) drawCasters(view shadowView, c *shadowCasters, materialStore 
 				poseModel(model.Model, p, a, r.posed)
 			}
 		}
-		override := materialFor(&c.withMaterial, materialStore, models.Entity())
+		override := materialFor(&c.withMaterial, materialStore, e)
 		if override != nil {
 			r.apply(override)
 		}
-		mp, _ := c.parts.Get(models.Entity())
+		mp, _ := c.parts.Get(e)
 		own := model.GetMaterials()
 		meshMaterial := unsafe.Slice(model.MeshMaterial, model.MeshCount)
 		for i, mesh := range model.GetMeshes() {

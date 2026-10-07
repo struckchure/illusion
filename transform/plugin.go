@@ -42,51 +42,53 @@ func propagate(
 	roots *illusion.Query2Where[Transform, GlobalTransform, illusion.Without[illusion.ChildOf]],
 	children *illusion.Query2Where[Transform, GlobalTransform, illusion.With[illusion.ChildOf]],
 	hierarchy *illusion.Hierarchy,
-	parents *illusion.Local[map[ecs.Entity]struct{}],
+	kids *illusion.Local[map[ecs.Entity][]ecs.Entity],
 ) {
-	// Find which entities have children first, so childless ones (usually
-	// most of them) don't each need a relation query.
-	p := parents.Get()
-	if *p == nil {
-		*p = map[ecs.Entity]struct{}{}
+	// Index each parent's children in one pass first. Asking the relation
+	// for one parent's children scans every parent's table, so doing that for
+	// each parent costs the square of how many there are.
+	k := kids.Get()
+	if *k == nil {
+		*k = map[ecs.Entity][]ecs.Entity{}
 	}
-	clear(*p)
+	for parent, list := range *k {
+		(*k)[parent] = list[:0]
+	}
 	children.Each(func(child ecs.Entity, _ *Transform, _ *GlobalTransform) {
 		if parent, ok := hierarchy.Parent(child); ok {
-			(*p)[parent] = struct{}{}
+			(*k)[parent] = append((*k)[parent], child)
 		}
 	})
-	if len(*p) == 0 {
-		roots.Each(func(_ ecs.Entity, t *Transform, g *GlobalTransform) { g.Matrix = t.Matrix() })
-		return
+	for parent, list := range *k {
+		if len(list) == 0 {
+			delete(*k, parent)
+		}
 	}
 
 	query := roots.Iter()
 	for query.Next() {
 		t, g := query.Get()
 		g.Matrix = t.Matrix()
-		if _, ok := (*p)[query.Entity()]; ok {
-			propagateChildren(children, *p, query.Entity(), g.Matrix)
+		if list, ok := (*k)[query.Entity()]; ok {
+			propagateChildren(children, *k, list, g.Matrix)
 		}
 	}
 }
 
-// childOfIndex is ChildOf's position in the children query: the With
-// component after Transform and GlobalTransform.
-const childOfIndex = 2
-
 func propagateChildren(
 	children *illusion.Query2Where[Transform, GlobalTransform, illusion.With[illusion.ChildOf]],
-	parents map[ecs.Entity]struct{},
-	parent ecs.Entity,
+	kids map[ecs.Entity][]ecs.Entity,
+	list []ecs.Entity,
 	parentMatrix rl.Matrix,
 ) {
-	query := children.Iter(ecs.RelIdx(childOfIndex, parent))
-	for query.Next() {
-		t, g := query.Get()
+	for _, child := range list {
+		t, g, ok := children.Get(child)
+		if !ok {
+			continue
+		}
 		g.Matrix = rl.MatrixMultiply(t.Matrix(), parentMatrix)
-		if _, ok := parents[query.Entity()]; ok {
-			propagateChildren(children, parents, query.Entity(), g.Matrix)
+		if grand, ok := kids[child]; ok {
+			propagateChildren(children, kids, grand, g.Matrix)
 		}
 	}
 }
