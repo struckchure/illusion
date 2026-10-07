@@ -194,6 +194,16 @@ type CharacterController struct {
 	Grounded bool
 	// GroundNormal is the normal of the ground under the character.
 	GroundNormal rl.Vector3
+
+	// Every steps the character only once every that many fixed steps, by
+	// all the time since it last was: for a crowd, where those far from
+	// anyone watching needn't be stepped as often. 0 or 1 steps it every
+	// time. Characters are spread over the steps between.
+	Every int
+	// Stepped reports whether the last fixed step moved the character
+	// (always, unless Every passed it over). Velocity, Grounded and
+	// GroundNormal are as of the last step that did.
+	Stepped bool
 }
 
 // CollisionStarted is sent when two entities start touching (or a sensor

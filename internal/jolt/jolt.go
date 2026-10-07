@@ -11,6 +11,28 @@ package jolt
 #cgo windows LDFLAGS: -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic
 #include <stdlib.h>
 #include "glue.h"
+
+// Called for every character every step: these only read or write the
+// vectors they're given, so the vectors needn't go to the heap, and they
+// don't call back into Go.
+#cgo noescape ILL_Character_GetPosition
+#cgo nocallback ILL_Character_GetPosition
+#cgo noescape ILL_Character_SetPosition
+#cgo nocallback ILL_Character_SetPosition
+#cgo noescape ILL_Character_GetVelocity
+#cgo nocallback ILL_Character_GetVelocity
+#cgo noescape ILL_Character_SetVelocity
+#cgo nocallback ILL_Character_SetVelocity
+#cgo noescape ILL_Character_GetGroundVelocity
+#cgo nocallback ILL_Character_GetGroundVelocity
+#cgo noescape ILL_Character_GetGroundNormal
+#cgo nocallback ILL_Character_GetGroundNormal
+#cgo noescape ILL_World_CastRay
+#cgo nocallback ILL_World_CastRay
+#cgo noescape ILL_World_OverlapCapsule
+#cgo nocallback ILL_World_OverlapCapsule
+#cgo noescape ILL_World_SweepCapsule
+#cgo nocallback ILL_World_SweepCapsule
 */
 import "C"
 
